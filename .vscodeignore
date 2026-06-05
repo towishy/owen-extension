@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
 .github/workflows/**
+dist/**
 *.zip
 src/**
 .gitignore

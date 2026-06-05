@@ -1,14 +1,15 @@
 import AdmZip from 'adm-zip';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const browserDir = join(root, 'browser-extension');
+const distDir = join(root, 'dist');
 const version = packageJson.version;
 const outputName = `owen-browser-capture-browser-extension-${version}.zip`;
-const outputPath = join(root, outputName);
+const outputPath = join(distDir, outputName);
 const checkOnly = process.argv.includes('--check');
 
 const requiredFiles = [
@@ -22,6 +23,7 @@ const requiredFiles = [
 validateBrowserExtension();
 
 if (!checkOnly) {
+  mkdirSync(distDir, { recursive: true });
   const zip = new AdmZip();
   const rootFolder = `owen-browser-capture-browser-extension-${version}`;
   for (const filePath of listFiles(browserDir)) {
@@ -30,7 +32,7 @@ if (!checkOnly) {
   }
   zip.writeZip(outputPath);
   verifyZip(outputPath, rootFolder);
-  console.log(`Created ${outputName}`);
+  console.log(`Created ${outputPath}`);
 }
 
 function validateBrowserExtension() {

@@ -263,8 +263,8 @@ npm run release:check
 
 This command verifies the browser extension manifest, compiles and lints the VS Code extension, builds the VSIX, builds the browser extension ZIP, and checks both release assets:
 
-- `owen-browser-bridge-<version>.vsix`
-- `owen-browser-capture-browser-extension-<version>.zip`
+- `dist/owen-browser-bridge-<version>.vsix`
+- `dist/owen-browser-capture-browser-extension-<version>.zip`
 
 Attach both files to the GitHub Release. The VSIX installs the VS Code side, and the ZIP is extracted and loaded as the unpacked Chrome/Edge browser extension.
 

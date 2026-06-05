@@ -8,8 +8,9 @@ const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const version = packageJson.version;
 const vsixName = `owen-browser-bridge-${version}.vsix`;
 const zipName = `owen-browser-capture-browser-extension-${version}.zip`;
-const vsix = join(root, vsixName);
-const browserZip = join(root, zipName);
+const distDir = join(root, 'dist');
+const vsix = join(distDir, vsixName);
+const browserZip = join(distDir, zipName);
 const browserZipRoot = `owen-browser-capture-browser-extension-${version}`;
 
 for (const asset of [vsix, browserZip]) {
@@ -29,5 +30,5 @@ for (const file of ['manifest.json', 'background.js', 'popup.html', 'popup.js', 
 }
 
 console.log(`Verified release assets for v${version}:`);
-console.log(`- ${vsixName}`);
-console.log(`- ${zipName}`);
+console.log(`- dist/${vsixName}`);
+console.log(`- dist/${zipName}`);

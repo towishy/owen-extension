@@ -39,8 +39,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          VSIX="owen-browser-bridge-${VERSION}.vsix"
-          BROWSER_ZIP="owen-browser-capture-browser-extension-${VERSION}.zip"
+          VSIX="dist/owen-browser-bridge-${VERSION}.vsix"
+          BROWSER_ZIP="dist/owen-browser-capture-browser-extension-${VERSION}.zip"
           TAG="v${VERSION}"
 
           if gh release view "${TAG}" >/dev/null 2>&1; then

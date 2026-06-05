@@ -206,8 +206,8 @@ npm run release:check
 
 The release check compiles the VS Code extension, runs lint, packages the VSIX, packages the browser extension ZIP, and verifies that both release assets exist:
 
-- `owen-browser-bridge-<version>.vsix`
-- `owen-browser-capture-browser-extension-<version>.zip`
+- `dist/owen-browser-bridge-<version>.vsix`
+- `dist/owen-browser-capture-browser-extension-<version>.zip`
 
 Upload both files to the GitHub Release for the same version tag.
 

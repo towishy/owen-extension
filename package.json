@@ -242,7 +242,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "validate:browser": "node scripts/package-browser-extension.mjs --check",
-    "package:vsix": "vsce package --no-dependencies",
+    "package:vsix": "node scripts/package-vsix.mjs",
     "package:browser": "node scripts/package-browser-extension.mjs",
     "verify:release-assets": "node scripts/verify-release-assets.mjs",
     "package": "npm run package:vsix && npm run package:browser && npm run verify:release-assets",
