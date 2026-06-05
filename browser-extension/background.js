@@ -8,6 +8,9 @@ const DEFAULT_OPTIONS = {
 };
 
 let pollInProgress = false;
+let lastReplayScript;
+const stateCheckpoints = new Map();
+const executionRunHistory = new Map();
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('owen-command-poll', { periodInMinutes: 0.5 });
@@ -81,10 +84,11 @@ async function executeBrowserCommand(command, options) {
     const capture = command.captureAfter || command.action === 'capture'
       ? await createCapturePayload(currentTab, command, options)
       : undefined;
-    return {
+    const response = {
       id: command.id,
       ok: true,
       result: {
+        runId: command.id,
         action: command.action,
         steps: executionTrail,
         url: currentTab.url,
@@ -93,6 +97,30 @@ async function executeBrowserCommand(command, options) {
       },
       capture
     };
+
+    executionRunHistory.set(command.id, {
+      runId: command.id,
+      createdAt: new Date().toISOString(),
+      action: command.action,
+      url: currentTab.url,
+      title: currentTab.title,
+      steps: executionTrail
+    });
+    if (executionRunHistory.size > 100) {
+      const oldest = executionRunHistory.keys().next().value;
+      if (oldest) {
+        executionRunHistory.delete(oldest);
+      }
+    }
+
+    lastReplayScript = {
+      exportedAt: new Date().toISOString(),
+      action: command.action,
+      command: { ...command, allowedHosts: undefined },
+      steps: executionTrail
+    };
+
+    return response;
   } catch (error) {
     const message = String(error?.message ?? error);
     const authPrefix = 'AUTH_REQUIRED::';
@@ -100,6 +128,13 @@ async function executeBrowserCommand(command, options) {
       const payloadText = message.slice(authPrefix.length);
       const payload = JSON.parse(payloadText);
       return { id: command.id, ok: false, error: 'AUTH_REQUIRED', result: payload };
+    }
+
+    const reviewPrefix = 'REVIEW_REQUIRED::';
+    if (message.startsWith(reviewPrefix)) {
+      const payloadText = message.slice(reviewPrefix.length);
+      const payload = JSON.parse(payloadText);
+      return { id: command.id, ok: false, error: 'REVIEW_REQUIRED', result: payload };
     }
 
     return { id: command.id, ok: false, error: message };
@@ -117,12 +152,86 @@ function normalizeWorkflowSteps(steps) {
 async function executeSingleAction(command, allowedHosts) {
   const action = command.action ?? 'readPage';
 
+  ensureOperatorConfirmed(command, action);
+
   if (action === 'journeyCapture') {
     return runJourneyCapture(command, allowedHosts);
   }
 
   if (action === 'paginateCapture') {
     return runPaginateCapture(command, allowedHosts);
+  }
+
+  if (action === 'smartFormFill') {
+    return runSmartFormFill(command, allowedHosts);
+  }
+
+  if (action === 'conditionalWorkflow') {
+    return runConditionalWorkflow(command, allowedHosts);
+  }
+
+  if (action === 'multiTabCrawl') {
+    return runMultiTabCrawl(command, allowedHosts);
+  }
+
+  if (action === 'runtimeSnapshot') {
+    return runRuntimeSnapshot(command, allowedHosts);
+  }
+
+  if (action === 'domDiffTimeline') {
+    return runDomDiffTimeline(command, allowedHosts);
+  }
+
+  if (action === 'ocrSnapshot') {
+    return runOcrSnapshot(command, allowedHosts);
+  }
+
+  if (action === 'dataGapGuard') {
+    return runDataGapGuard(command, allowedHosts);
+  }
+
+  if (action === 'exportReplay') {
+    return runExportReplay();
+  }
+
+  if (action === 'networkTraceCapture') {
+    return runNetworkTraceCapture(command, allowedHosts);
+  }
+
+  if (action === 'safeDownloadAndHash') {
+    return runSafeDownloadAndHash(command, allowedHosts);
+  }
+
+  if (action === 'tableExtract') {
+    return runTableExtract(command, allowedHosts);
+  }
+
+  if (action === 'stateCheckpoint') {
+    return runStateCheckpoint(command, allowedHosts);
+  }
+
+  if (action === 'rollbackToCheckpoint') {
+    return runRollbackToCheckpoint(command, allowedHosts);
+  }
+
+  if (action === 'humanReviewGate') {
+    return runHumanReviewGate(command, allowedHosts);
+  }
+
+  if (action === 'bulkActionFromList') {
+    return runBulkActionFromList(command, allowedHosts);
+  }
+
+  if (action === 'semanticWait') {
+    return runSemanticWait(command, allowedHosts);
+  }
+
+  if (action === 'compareCaptureRuns') {
+    return runCompareCaptureRuns(command);
+  }
+
+  if (action === 'policyGuard') {
+    return runPolicyGuard(command, allowedHosts);
   }
 
   if (action === 'navigate') {
@@ -212,6 +321,631 @@ async function executeSingleAction(command, allowedHosts) {
   }
 
   throw new Error(lastError);
+}
+
+function ensureOperatorConfirmed(command, action) {
+  const highRisk = new Set(['navigate', 'openInNewTab', 'closeTab', 'journeyCapture', 'paginateCapture', 'multiTabCrawl']);
+  if (!highRisk.has(action)) {
+    return;
+  }
+
+  if (!command.acknowledgement || command.acknowledgement === 'CONFIRM_BROWSER_ACTION') {
+    return;
+  }
+
+  throw new Error('High-risk action requires acknowledgement=CONFIRM_BROWSER_ACTION.');
+}
+
+async function runSmartFormFill(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: runDomCommand,
+    args: [{ action: 'smartFormFill', formFields: command.formFields, submitSelector: command.submitSelector, submitText: command.submitText }]
+  });
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+
+  return result ?? { ok: true };
+}
+
+async function runConditionalWorkflow(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+
+  const outputs = [];
+  const conditions = Array.isArray(command.conditions) ? command.conditions : [];
+  for (const entry of conditions) {
+    const matched = await evaluateConditionOnTab(tab.id, entry?.if);
+    const selectedSteps = matched ? (Array.isArray(entry?.then) ? entry.then : []) : (Array.isArray(entry?.else) ? entry.else : []);
+    const results = [];
+    for (const step of selectedSteps.slice(0, 20)) {
+      const stepResult = await executeSingleAction({ ...command, ...step, action: step.action ?? 'readPage' }, allowedHosts);
+      results.push(stepResult);
+    }
+    outputs.push({ matched, stepsExecuted: selectedSteps.length, results });
+  }
+
+  return { ok: true, branches: outputs };
+}
+
+async function runMultiTabCrawl(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const maxTabs = Math.min(Math.max(Number(command.maxTabs) || 5, 1), 30);
+
+  const [{ result: links }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: (linkSelector, linkText, max) => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const nodes = linkSelector
+        ? Array.from(document.querySelectorAll(linkSelector))
+        : Array.from(document.querySelectorAll('a[href]'));
+      const filterText = normalize(linkText);
+      return nodes
+        .map(node => ({ href: node.href, text: normalize(node.innerText || node.getAttribute('aria-label') || '') }))
+        .filter(item => item.href && (!filterText || item.text.includes(filterText)))
+        .slice(0, max)
+        .map(item => item.href);
+    },
+    args: [command.linkSelector, command.linkText, maxTabs]
+  });
+
+  const targets = Array.isArray(links) ? links : [];
+  const pages = [];
+  for (const href of targets) {
+    assertAllowedUrl(href, allowedHosts);
+    const created = await chrome.tabs.create({ url: href, active: false });
+    if (!created?.id) {
+      continue;
+    }
+    await waitForTabComplete(created.id, command.timeoutMs).catch(() => undefined);
+    const summary = await collectTabSummary(created.id, command.extractSelectors);
+    pages.push(summary);
+    await chrome.tabs.remove(created.id).catch(() => undefined);
+  }
+
+  return { ok: true, crawled: pages.length, pages };
+}
+
+async function runRuntimeSnapshot(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      const resources = performance.getEntriesByType('resource').slice(-30).map(entry => ({
+        name: entry.name,
+        type: entry.initiatorType,
+        duration: Math.round(entry.duration)
+      }));
+      const nav = performance.getEntriesByType('navigation')[0];
+      return {
+        ok: true,
+        url: location.href,
+        title: document.title,
+        navigation: nav ? {
+          domContentLoaded: Math.round(nav.domContentLoadedEventEnd),
+          loadEventEnd: Math.round(nav.loadEventEnd)
+        } : undefined,
+        resources,
+        consoleSupport: 'Console log history is not persisted in MV3 runtime by default.'
+      };
+    }
+  });
+  return result ?? { ok: true };
+}
+
+async function runDomDiffTimeline(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const timeline = [];
+  let before = await collectDomFingerprint(tab.id);
+
+  const steps = Array.isArray(command.steps) ? command.steps.slice(0, 20) : [];
+  for (const step of steps) {
+    const result = await executeSingleAction({ ...command, ...step, action: step.action ?? 'readPage' }, allowedHosts);
+    const after = await collectDomFingerprint(tab.id);
+    timeline.push({
+      action: step.action ?? 'readPage',
+      result,
+      beforeHash: before.hash,
+      afterHash: after.hash,
+      textDelta: after.textLength - before.textLength,
+      headingDelta: after.headings - before.headings
+    });
+    before = after;
+  }
+
+  return { ok: true, timeline };
+}
+
+async function runOcrSnapshot(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  const [{ result: hint }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const altTexts = Array.from(document.querySelectorAll('img[alt]')).slice(0, 50).map(node => normalize(node.getAttribute('alt'))).filter(Boolean);
+      const visibleText = normalize(document.body?.innerText ?? '').slice(0, 2000);
+      return { altTexts, visibleText };
+    }
+  });
+
+  return {
+    ok: true,
+    ocrSupported: false,
+    message: 'True OCR is not embedded in this runtime. Returned screenshot and DOM-based text hints instead.',
+    screenshotDataUrl: dataUrl,
+    hint
+  };
+}
+
+async function runDataGapGuard(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const summary = await collectTabSummary(tab.id, command.extractSelectors);
+  const requiredFields = Array.isArray(command.requiredFields) ? command.requiredFields : [];
+  const requiredTexts = Array.isArray(command.requiredTexts) ? command.requiredTexts : [];
+
+  const missingFields = requiredFields.filter(field => !summary.extracted || !String(summary.extracted[field] ?? '').trim());
+  const visibleLower = String(summary.visibleTextSample ?? '').toLowerCase();
+  const missingTexts = requiredTexts.filter(text => !visibleLower.includes(String(text).toLowerCase()));
+
+  return {
+    ok: true,
+    summary,
+    missingFields,
+    missingTexts,
+    gapDetected: missingFields.length > 0 || missingTexts.length > 0
+  };
+}
+
+function runExportReplay() {
+  return {
+    ok: true,
+    replay: lastReplayScript ?? null,
+    message: lastReplayScript ? 'Replay script exported from latest browser action.' : 'No replay script is available yet.'
+  };
+}
+
+async function runNetworkTraceCapture(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: (urlIncludes, maxEntries) => {
+      const filters = Array.isArray(urlIncludes) ? urlIncludes.map(value => String(value).toLowerCase()).filter(Boolean) : [];
+      const rows = performance.getEntriesByType('resource')
+        .map(entry => ({
+          name: entry.name,
+          initiatorType: entry.initiatorType,
+          durationMs: Math.round(entry.duration),
+          transferSize: Number(entry.transferSize || 0)
+        }))
+        .filter(item => filters.length === 0 || filters.some(filter => item.name.toLowerCase().includes(filter)))
+        .slice(-Math.min(Math.max(Number(maxEntries) || 30, 1), 200));
+      return { ok: true, capturedAt: new Date().toISOString(), trace: rows };
+    },
+    args: [command.urlIncludes, command.maxEntries]
+  });
+  return result ?? { ok: true, trace: [] };
+}
+
+async function runSafeDownloadAndHash(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: async (selector, text, explicitUrl) => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const byText = normalize(text);
+      let targetUrl = explicitUrl;
+      if (!targetUrl) {
+        const node = selector
+          ? document.querySelector(selector)
+          : Array.from(document.querySelectorAll('a[href],button,[role="button"]')).find(element => {
+            const label = normalize(element.innerText || element.getAttribute('aria-label') || element.getAttribute('title') || '');
+            return byText && label.includes(byText);
+          });
+        targetUrl = node?.href || node?.getAttribute?.('data-href') || '';
+      }
+
+      if (!targetUrl) {
+        return { error: 'Download URL could not be resolved.' };
+      }
+
+      const response = await fetch(targetUrl, { credentials: 'include' });
+      if (!response.ok) {
+        return { error: `Download request failed: HTTP ${response.status}` };
+      }
+
+      const buffer = await response.arrayBuffer();
+      const digest = await crypto.subtle.digest('SHA-256', buffer);
+      const hashHex = Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+      return {
+        ok: true,
+        url: targetUrl,
+        sizeBytes: buffer.byteLength,
+        sha256: hashHex,
+        contentType: response.headers.get('content-type') || undefined
+      };
+    },
+    args: [command.selector, command.text, command.url]
+  });
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+  return result ?? { ok: true };
+}
+
+async function runTableExtract(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: (tableSelector, headerMode, outputFormat) => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const table = tableSelector ? document.querySelector(tableSelector) : document.querySelector('table');
+      if (!table) {
+        return { error: 'Table not found.' };
+      }
+
+      const rows = Array.from(table.querySelectorAll('tr'));
+      if (rows.length === 0) {
+        return { ok: true, rows: [], csv: '' };
+      }
+
+      const hasThead = table.querySelectorAll('thead th').length > 0;
+      const mode = headerMode || 'auto';
+      const headerCells = mode === 'thead' || (mode === 'auto' && hasThead)
+        ? Array.from(table.querySelectorAll('thead th'))
+        : Array.from(rows[0].querySelectorAll('th,td'));
+      const headers = headerCells.map(cell => normalize(cell.textContent || '')).map((value, index) => value || `col_${index + 1}`);
+
+      const bodyRows = mode === 'firstRow' || (!hasThead && mode === 'auto') ? rows.slice(1) : rows;
+      const data = bodyRows
+        .map(row => Array.from(row.querySelectorAll('td,th')).map(cell => normalize(cell.textContent || '')))
+        .filter(cells => cells.length > 0)
+        .map(cells => {
+          const record = {};
+          headers.forEach((header, index) => {
+            record[header] = cells[index] ?? '';
+          });
+          return record;
+        });
+
+      const csvLines = [headers, ...data.map(record => headers.map(header => String(record[header] ?? '').replace(/"/g, '""')))]
+        .map(line => line.map(cell => `"${cell}"`).join(','));
+      return {
+        ok: true,
+        headers,
+        rowCount: data.length,
+        rows: outputFormat === 'csv' ? undefined : data,
+        csv: csvLines.join('\n')
+      };
+    },
+    args: [command.tableSelector, command.headerMode, command.outputFormat]
+  });
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+  return result ?? { ok: true, rows: [] };
+}
+
+async function runStateCheckpoint(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const checkpointName = String(command.checkpointName || '').trim();
+
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: includeFormState => {
+      const formState = [];
+      if (includeFormState) {
+        const controls = Array.from(document.querySelectorAll('input,textarea,select')).slice(0, 300);
+        for (const element of controls) {
+          const key = element.id || element.name || element.getAttribute('aria-label') || '';
+          if (!key) {
+            continue;
+          }
+          formState.push({
+            key,
+            value: element.type === 'checkbox' || element.type === 'radio' ? String(Boolean(element.checked)) : String(element.value ?? ''),
+            type: element.type || element.tagName.toLowerCase()
+          });
+        }
+      }
+
+      return {
+        ok: true,
+        url: location.href,
+        title: document.title,
+        scrollX: Math.round(window.scrollX),
+        scrollY: Math.round(window.scrollY),
+        formState
+      };
+    },
+    args: [Boolean(command.includeFormState)]
+  });
+
+  if (!checkpointName) {
+    throw new Error('stateCheckpoint requires checkpointName.');
+  }
+
+  stateCheckpoints.set(checkpointName, {
+    checkpointName,
+    createdAt: new Date().toISOString(),
+    tabIndex: tab.index,
+    ...result
+  });
+
+  return { ok: true, checkpointName, saved: stateCheckpoints.get(checkpointName) };
+}
+
+async function runRollbackToCheckpoint(command, allowedHosts) {
+  const checkpointName = String(command.checkpointName || '').trim();
+  const checkpoint = stateCheckpoints.get(checkpointName);
+  if (!checkpoint) {
+    throw new Error(`Checkpoint not found: ${checkpointName}`);
+  }
+
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+
+  if (command.strictUrlMatch && checkpoint.url !== tab.url) {
+    throw new Error('strictUrlMatch=true and current URL differs from checkpoint URL.');
+  }
+
+  if (checkpoint.url && checkpoint.url !== tab.url) {
+    await chrome.tabs.update(tab.id, { url: checkpoint.url });
+    await waitForTabComplete(tab.id, command.timeoutMs).catch(() => undefined);
+  }
+
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: saved => {
+      const entries = Array.isArray(saved?.formState) ? saved.formState : [];
+      for (const entry of entries) {
+        const selector = `#${CSS.escape(entry.key)}`;
+        const byId = document.querySelector(selector);
+        const byName = document.querySelector(`[name="${CSS.escape(entry.key)}"]`);
+        const target = byId || byName;
+        if (!target) {
+          continue;
+        }
+
+        if (target.type === 'checkbox' || target.type === 'radio') {
+          target.checked = entry.value === 'true';
+        } else {
+          target.value = entry.value;
+        }
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      window.scrollTo({ left: Number(saved?.scrollX) || 0, top: Number(saved?.scrollY) || 0, behavior: 'auto' });
+      return { ok: true, restoredCount: entries.length, url: location.href };
+    },
+    args: [checkpoint]
+  });
+
+  return result ?? { ok: true, checkpointName };
+}
+
+async function runHumanReviewGate(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+
+  const expected = String(command.approvalKeyword || '').trim();
+  const provided = String(command.value || '').trim();
+  if (expected && provided && expected === provided) {
+    return { ok: true, approved: true, message: 'Manual review approved.' };
+  }
+
+  throw new Error(`REVIEW_REQUIRED::${JSON.stringify({
+    reviewRequired: true,
+    message: command.reviewPrompt || '위험 단계 전 수동 검토가 필요합니다. approvalKeyword 값을 확인해 다시 실행하세요.',
+    approvalKeyword: expected || undefined
+  })}`);
+}
+
+async function runBulkActionFromList(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: (itemSelector, matchText, matchMode, actionTemplate, maxItems) => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const nodes = Array.from(document.querySelectorAll(itemSelector));
+      const mode = matchMode || 'includes';
+      const needle = normalize(matchText || '');
+      const limit = Math.min(Math.max(Number(maxItems) || 20, 1), 200);
+
+      const matched = nodes.filter(node => {
+        if (!needle) {
+          return true;
+        }
+        const hay = normalize(node.innerText || node.textContent || '');
+        if (mode === 'equals') {
+          return hay === needle;
+        }
+        if (mode === 'regex') {
+          try {
+            return new RegExp(matchText, 'i').test(hay);
+          } catch {
+            return false;
+          }
+        }
+        return hay.includes(needle);
+      }).slice(0, limit);
+
+      const action = String(actionTemplate?.action || 'click');
+      const details = [];
+      for (const node of matched) {
+        if (action === 'click') {
+          node.click();
+        } else if (action === 'hover') {
+          node.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        }
+        details.push({ action, text: normalize(node.innerText || node.textContent || '').slice(0, 200) });
+      }
+
+      return { ok: true, processed: details.length, details };
+    },
+    args: [command.itemSelector, command.matchText, command.matchMode, command.actionTemplate, command.maxItems]
+  });
+
+  return result ?? { ok: true, processed: 0, details: [] };
+}
+
+async function runSemanticWait(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: runDomCommand,
+    args: [{ action: 'wait', wait: { kind: 'semantic', semanticConditions: command.semanticConditions }, timeoutMs: command.timeoutMs }]
+  });
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+  return result ?? { ok: true };
+}
+
+function runCompareCaptureRuns(command) {
+  const runIds = Array.from(executionRunHistory.keys());
+  const latestRunId = command.newRunId || runIds[runIds.length - 1];
+  const baseRunId = command.baseRunId || runIds[runIds.length - 2];
+  if (!latestRunId || !baseRunId) {
+    throw new Error('compareCaptureRuns requires at least two run histories.');
+  }
+
+  const base = executionRunHistory.get(baseRunId);
+  const latest = executionRunHistory.get(latestRunId);
+  if (!base || !latest) {
+    throw new Error('compareCaptureRuns run id not found in current session history.');
+  }
+
+  const baseStepCount = Array.isArray(base.steps) ? base.steps.length : 0;
+  const latestStepCount = Array.isArray(latest.steps) ? latest.steps.length : 0;
+  return {
+    ok: true,
+    baseRunId,
+    newRunId: latestRunId,
+    changed: {
+      urlChanged: base.url !== latest.url,
+      titleChanged: base.title !== latest.title,
+      stepDelta: latestStepCount - baseStepCount
+    },
+    base,
+    latest,
+    ignoredSelectors: Array.isArray(command.ignoreSelectors) ? command.ignoreSelectors : []
+  };
+}
+
+async function runPolicyGuard(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const host = new URL(tab.url).hostname.toLowerCase();
+
+  const profiles = {
+    strict: {
+      allowedSuffixes: ['microsoft.com', 'microsoft365.com'],
+      blockedActions: ['closeTab']
+    },
+    standard: {
+      allowedSuffixes: [],
+      blockedActions: []
+    },
+    investigation: {
+      allowedSuffixes: ['microsoft.com', 'microsoft365.com', 'azure.com'],
+      blockedActions: []
+    }
+  };
+
+  const profile = profiles[String(command.policyProfile || 'standard')] || profiles.standard;
+  const hostAllowed = profile.allowedSuffixes.length === 0 || profile.allowedSuffixes.some(suffix => host.endsWith(suffix));
+  const actionBlocked = profile.blockedActions.includes(String(command.actionTemplate?.action || ''));
+  const violations = [];
+  if (!hostAllowed) {
+    violations.push(`Host not allowed by policy profile: ${host}`);
+  }
+  if (actionBlocked) {
+    violations.push(`Action blocked by policy profile: ${command.actionTemplate?.action}`);
+  }
+
+  if (violations.length > 0 && command.onViolation !== 'warn') {
+    throw new Error(`Policy violation: ${violations.join('; ')}`);
+  }
+
+  return {
+    ok: true,
+    profile: command.policyProfile,
+    host,
+    violations,
+    passed: violations.length === 0
+  };
+}
+
+async function evaluateConditionOnTab(tabId, condition) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (input) => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (input?.selector) {
+        const target = document.querySelector(input.selector);
+        if (target) {
+          return true;
+        }
+      }
+      if (input?.text) {
+        const pageText = normalize(document.body?.innerText ?? '');
+        if (pageText.includes(normalize(input.text))) {
+          return true;
+        }
+      }
+      if (input?.urlPattern) {
+        return location.href.includes(input.urlPattern);
+      }
+      return false;
+    },
+    args: [condition]
+  });
+
+  return Boolean(result);
+}
+
+async function collectDomFingerprint(tabId) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const text = normalize(document.body?.innerText ?? '').slice(0, 40000);
+      let hash = 2166136261;
+      for (let i = 0; i < text.length; i += 1) {
+        hash ^= text.charCodeAt(i);
+        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+      }
+      return {
+        hash: `h${(hash >>> 0).toString(16)}`,
+        textLength: text.length,
+        headings: document.querySelectorAll('h1,h2,h3').length
+      };
+    }
+  });
+
+  return result ?? { hash: 'h0', textLength: 0, headings: 0 };
 }
 
 async function runJourneyCapture(command, allowedHosts) {
@@ -351,6 +1085,7 @@ async function collectTabSummary(tabId, extractSelectors) {
         url: location.href,
         title: document.title,
         visibleTextLength: visibleText.length,
+        visibleTextSample: visibleText.slice(0, 2000),
         headings,
         buttons: buttons.slice(0, 30),
         extracted
@@ -563,6 +1298,10 @@ function runDomCommand(command) {
       const interval = Number.isFinite(condition?.pollIntervalMs) ? Math.max(100, Math.min(5000, condition.pollIntervalMs)) : 400;
       const deadline = Date.now() + (command.timeoutMs ?? 60000);
       const spinnerSelector = condition?.selector ?? '[aria-busy="true"], [role="progressbar"], .spinner, .loading';
+      let stableCount = 0;
+      let lastStableText = '';
+      let urlStableCount = 0;
+      let lastUrl = location.href;
 
       const check = () => {
         if (kind === 'urlMatch') {
@@ -605,6 +1344,69 @@ function runDomCommand(command) {
           const spinner = Array.from(document.querySelectorAll(spinnerSelector)).find(isVisible);
           if (!spinner) {
             resolve({ ok: true });
+            return;
+          }
+        } else if (kind === 'elementStable') {
+          const selector = condition?.selector ?? command.selector ?? '';
+          const element = selector ? document.querySelector(selector) : undefined;
+          const text = normalize(element?.innerText || element?.textContent || '');
+          if (text && text === lastStableText) {
+            stableCount += 1;
+          } else {
+            stableCount = 0;
+            lastStableText = text;
+          }
+          if (stableCount >= 2) {
+            resolve({ ok: true });
+            return;
+          }
+        } else if (kind === 'urlSettled') {
+          const nowUrl = location.href;
+          if (nowUrl === lastUrl) {
+            urlStableCount += 1;
+          } else {
+            urlStableCount = 0;
+            lastUrl = nowUrl;
+          }
+          if (urlStableCount >= 2) {
+            resolve({ ok: true });
+            return;
+          }
+        } else if (kind === 'composite') {
+          const spinner = Array.from(document.querySelectorAll(spinnerSelector)).find(isVisible);
+          const selector = condition?.selector ?? command.selector ?? '';
+          const element = selector ? document.querySelector(selector) : undefined;
+          if (!spinner && (!selector || isVisible(element))) {
+            resolve({ ok: true });
+            return;
+          }
+        } else if (kind === 'semantic') {
+          const conditions = Array.isArray(condition?.semanticConditions) ? condition.semanticConditions : [];
+          const pageText = normalize(document.body?.innerText ?? '').toLowerCase();
+          const allPassed = conditions.every(item => {
+            const value = String(item ?? '').trim();
+            if (!value) {
+              return true;
+            }
+            if (value.startsWith('text:')) {
+              return pageText.includes(normalize(value.slice(5)).toLowerCase());
+            }
+            if (value.startsWith('notText:')) {
+              return !pageText.includes(normalize(value.slice(8)).toLowerCase());
+            }
+            if (value.startsWith('selector:')) {
+              const selector = value.slice(9).trim();
+              return selector ? isVisible(document.querySelector(selector)) : false;
+            }
+            if (value.startsWith('selectorGone:')) {
+              const selector = value.slice(13).trim();
+              return selector ? !isVisible(document.querySelector(selector)) : false;
+            }
+            return pageText.includes(normalize(value).toLowerCase());
+          });
+
+          if (allPassed) {
+            resolve({ ok: true, semanticConditions: conditions });
             return;
           }
         }
@@ -673,6 +1475,48 @@ function runDomCommand(command) {
       target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
       target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
       return { ok: true, key };
+    }
+
+    if (command.action === 'smartFormFill') {
+      const fields = command.formFields && typeof command.formFields === 'object' ? command.formFields : {};
+      const updates = [];
+      for (const [fieldName, fieldValue] of Object.entries(fields)) {
+        const key = normalize(fieldName).toLowerCase();
+        const candidates = Array.from(document.querySelectorAll('input,textarea,select'));
+        const target = candidates.find(element => {
+          const label = normalize(element.getAttribute('aria-label') || element.getAttribute('name') || element.getAttribute('placeholder') || '').toLowerCase();
+          return Boolean(label) && label.includes(key);
+        });
+        if (!target) {
+          updates.push({ field: fieldName, updated: false });
+          continue;
+        }
+
+        target.focus();
+        if (target.tagName?.toLowerCase() === 'select') {
+          const select = target;
+          const option = Array.from(select.options).find(item => normalize(item.value).toLowerCase() === normalize(fieldValue).toLowerCase() || normalize(item.textContent).toLowerCase().includes(normalize(fieldValue).toLowerCase()));
+          if (option) {
+            select.value = option.value;
+          }
+        } else {
+          target.value = String(fieldValue);
+        }
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        updates.push({ field: fieldName, updated: true });
+      }
+
+      if (command.submitSelector || command.submitText) {
+        const submit = command.submitSelector
+          ? document.querySelector(command.submitSelector)
+          : Array.from(document.querySelectorAll('button,input[type="submit"],a,[role="button"]')).find(node => normalize(node.innerText || node.value || node.getAttribute('aria-label') || '').toLowerCase().includes(normalize(command.submitText).toLowerCase()));
+        if (submit) {
+          submit.click();
+        }
+      }
+
+      return { ok: true, updates };
     }
 
     const element = findByIntent();

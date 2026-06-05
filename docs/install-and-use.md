@@ -31,7 +31,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.7.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.8.vsix --force
 ```
 
 macOS terminal:
@@ -41,7 +41,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.7.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.8.vsix --force
 ```
 
 If `code` is unavailable, open VS Code and run `Shell Command: Install 'code' command in PATH`.
@@ -174,9 +174,9 @@ For paired browser control:
 
 `#browserAct` supports `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. Actions are delivered through the paired browser extension, limited to **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are available for richer automation: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are available for richer automation: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` also supports resilient workflow and traversal inputs: `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `urls`, `maxPages`, `nextSelector`, `nextText`, and `extractSelectors`.
+`#browserAct` also supports resilient workflow and traversal inputs: `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `urls`, `maxPages`, `nextSelector`, `nextText`, `extractSelectors`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, and `policyProfile`.
 
 URL traversal example:
 

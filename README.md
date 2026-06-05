@@ -11,7 +11,7 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
-## New in 0.1.7
+## New in 0.1.8
 
 - URL traversal capture with `journeyCapture` (visit URL lists and collect page-by-page evidence).
 - Pagination capture with `paginateCapture` (follow next page controls and collect multi-page summaries).
@@ -56,7 +56,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.7.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.8.vsix --force
 ```
 
 macOS terminal:
@@ -66,7 +66,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.7.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.8.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -183,9 +183,11 @@ For paired browser control on allowed hosts:
 
 Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` supports `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `urls`, `maxPages`, `nextSelector`, `nextText`, and `extractSelectors` so Copilot can run resilient multi-step browser workflows and page-to-page data collection on allowed hosts.
+`#browserAct` supports `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, checkpoint rollback, manual review gates, and policy checks.
+
+`ocrSnapshot` returns screenshot plus DOM text hints. True OCR engine embedding is not included in this runtime.
 
 Example: link-driven journey capture + auto analysis
 

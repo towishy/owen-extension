@@ -51,10 +51,11 @@ type CaptureGroupSummary = {
 };
 
 type BrowserWaitCondition = {
-	kind?: 'text' | 'element' | 'elementGone' | 'urlMatch' | 'spinnerGone';
+	kind?: 'text' | 'element' | 'elementGone' | 'urlMatch' | 'spinnerGone' | 'elementStable' | 'urlSettled' | 'composite' | 'semantic';
 	text?: string;
 	selector?: string;
 	urlPattern?: string;
+	semanticConditions?: string[];
 	pollIntervalMs?: number;
 };
 
@@ -65,11 +66,21 @@ type BrowserStepInput = {
 	value?: string;
 	url?: string;
 	urls?: string[];
+	formFields?: Record<string, string>;
+	submitSelector?: string;
+	submitText?: string;
+	conditions?: Array<{ if?: { selector?: string; text?: string; urlPattern?: string }; then?: BrowserStepInput[]; else?: BrowserStepInput[] }>;
+	linkSelector?: string;
+	linkText?: string;
 	key?: string;
 	role?: string;
 	label?: string;
 	index?: number;
 	maxPages?: number;
+	maxTabs?: number;
+	requiredFields?: string[];
+	requiredTexts?: string[];
+	acknowledgement?: string;
 	nextSelector?: string;
 	nextText?: string;
 	extractSelectors?: Record<string, string>;
@@ -87,6 +98,28 @@ type BrowserStepInput = {
 	captureAfter?: boolean;
 	includeScreenshot?: boolean;
 	includeHtml?: boolean;
+	urlIncludes?: string[];
+	durationMs?: number;
+	maxEntries?: number;
+	tableSelector?: string;
+	headerMode?: 'auto' | 'thead' | 'firstRow';
+	outputFormat?: 'json' | 'csv';
+	checkpointName?: string;
+	includeFormState?: boolean;
+	strictUrlMatch?: boolean;
+	reviewPrompt?: string;
+	approvalKeyword?: string;
+	itemSelector?: string;
+	matchText?: string;
+	matchMode?: 'includes' | 'equals' | 'regex';
+	actionTemplate?: BrowserStepInput;
+	maxItems?: number;
+	semanticConditions?: string[];
+	baseRunId?: string;
+	newRunId?: string;
+	ignoreSelectors?: string[];
+	policyProfile?: string;
+	onViolation?: 'block' | 'warn';
 };
 
 type BrowserPreset = 'defenderIncidentSurvey' | 'defenderIncidentAlerts' | 'defenderIncidentEvidence';
@@ -113,6 +146,24 @@ type BrowserAction =
 	| 'listInteractables'
 	| 'journeyCapture'
 	| 'paginateCapture'
+	| 'smartFormFill'
+	| 'conditionalWorkflow'
+	| 'multiTabCrawl'
+	| 'runtimeSnapshot'
+	| 'domDiffTimeline'
+	| 'ocrSnapshot'
+	| 'dataGapGuard'
+	| 'exportReplay'
+	| 'networkTraceCapture'
+	| 'safeDownloadAndHash'
+	| 'tableExtract'
+	| 'stateCheckpoint'
+	| 'rollbackToCheckpoint'
+	| 'humanReviewGate'
+	| 'bulkActionFromList'
+	| 'semanticWait'
+	| 'compareCaptureRuns'
+	| 'policyGuard'
 	| 'resumeAfterAuth'
 	| 'runWorkflow';
 
@@ -130,11 +181,21 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	value?: string;
 	url?: string;
 	urls?: string[];
+	formFields?: Record<string, string>;
+	submitSelector?: string;
+	submitText?: string;
+	conditions?: Array<{ if?: { selector?: string; text?: string; urlPattern?: string }; then?: BrowserStepInput[]; else?: BrowserStepInput[] }>;
+	linkSelector?: string;
+	linkText?: string;
 	key?: string;
 	role?: string;
 	label?: string;
 	index?: number;
 	maxPages?: number;
+	maxTabs?: number;
+	requiredFields?: string[];
+	requiredTexts?: string[];
+	acknowledgement?: string;
 	nextSelector?: string;
 	nextText?: string;
 	extractSelectors?: Record<string, string>;
@@ -150,6 +211,28 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	confirmDangerous: boolean;
 	steps: BrowserStepInput[];
 	preset?: BrowserPreset;
+	urlIncludes: string[];
+	durationMs: number;
+	maxEntries: number;
+	tableSelector?: string;
+	headerMode?: 'auto' | 'thead' | 'firstRow';
+	outputFormat?: 'json' | 'csv';
+	checkpointName?: string;
+	includeFormState: boolean;
+	strictUrlMatch: boolean;
+	reviewPrompt?: string;
+	approvalKeyword?: string;
+	itemSelector?: string;
+	matchText?: string;
+	matchMode?: 'includes' | 'equals' | 'regex';
+	actionTemplate?: BrowserStepInput;
+	maxItems: number;
+	semanticConditions: string[];
+	baseRunId?: string;
+	newRunId?: string;
+	ignoreSelectors: string[];
+	policyProfile?: string;
+	onViolation: 'block' | 'warn';
 	investigationName?: string;
 	allowedHosts: string[];
 };
@@ -173,6 +256,12 @@ type AuthRequiredResult = {
 	resumeInput?: BrowserActInput;
 	pages?: unknown[];
 	visitedCount?: number;
+};
+
+type ReviewRequiredResult = {
+	reviewRequired?: boolean;
+	message?: string;
+	approvalKeyword?: string;
 };
 
 let server: http.Server | undefined;
@@ -285,6 +374,22 @@ async function handleRequest(context: vscode.ExtensionContext, request: http.Inc
 
 		const completion = await completeBrowserCommand(context, JSON.parse(await readBody(request)) as BrowserCommandResult);
 		writeJson(response, 200, { ok: true, storedCapture: completion.storedCapture });
+		return;
+	}
+
+	if (request.url === '/commands/enqueue' && request.method === 'POST') {
+		if (!await isAuthorized(context, request)) {
+			writeJson(response, 401, { error: 'unauthorized' });
+			return;
+		}
+
+		try {
+			const input = JSON.parse(await readBody(request)) as BrowserActInput;
+			const { command, completion } = await invokeBrowserAction(context, input);
+			writeJson(response, 200, { ok: true, command, completion });
+		} catch (error) {
+			writeJson(response, 400, { error: String(error instanceof Error ? error.message : error) });
+		}
 		return;
 	}
 
@@ -419,15 +524,7 @@ function createReadCaptureGroupTool(context: vscode.ExtensionContext): vscode.La
 function createBrowserActTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<BrowserActInput> {
 	return {
 		async invoke(options) {
-			const resumeRequested = (options.input.action as BrowserAction | undefined) === 'resumeAfterAuth';
-			const command = resumeRequested
-				? createResumeBrowserCommand(context)
-				: createBrowserCommand(options.input);
-			const completion = await enqueueBrowserCommand(command);
-			const authRequired = parseAuthRequiredResult(completion.result);
-			if (authRequired?.authRequired && authRequired.resumeInput) {
-				await context.globalState.update('pendingAuthResumeInput', authRequired.resumeInput);
-			}
+			const { command, completion } = await invokeBrowserAction(context, options.input);
 			return new vscode.LanguageModelToolResult([
 				vscode.LanguageModelDataPart.json({ command, completion }),
 				vscode.LanguageModelDataPart.text(renderBrowserActMessage(command, completion), 'text/plain')
@@ -439,10 +536,28 @@ function createBrowserActTool(context: vscode.ExtensionContext): vscode.Language
 	};
 }
 
+async function invokeBrowserAction(context: vscode.ExtensionContext, input: BrowserActInput) {
+	const resumeRequested = (input.action as BrowserAction | undefined) === 'resumeAfterAuth';
+	const command = resumeRequested
+		? createResumeBrowserCommand(context)
+		: createBrowserCommand(input);
+	const completion = await enqueueBrowserCommand(command);
+	const authRequired = parseAuthRequiredResult(completion.result);
+	if (authRequired?.authRequired && authRequired.resumeInput) {
+		await context.globalState.update('pendingAuthResumeInput', authRequired.resumeInput);
+	}
+
+	return { command, completion };
+}
+
 const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'readPage', 'capture', 'click', 'type', 'navigate', 'waitForText', 'wait', 'scroll', 'hover', 'keyPress',
 	'selectOption', 'clearInput', 'back', 'forward', 'reload', 'openInNewTab', 'switchTab', 'closeTab',
-	'listInteractables', 'journeyCapture', 'paginateCapture', 'resumeAfterAuth', 'runWorkflow'
+	'listInteractables', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
+	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
+	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
+	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard',
+	'resumeAfterAuth', 'runWorkflow'
 ];
 
 const DESTRUCTIVE_BROWSER_ACTIONS: BrowserAction[] = ['closeTab'];
@@ -484,11 +599,21 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		value: input.value,
 		url: input.url,
 		urls: sanitizeStringList(input.urls),
+		formFields: sanitizeSelectorMap(input.formFields),
+		submitSelector: input.submitSelector,
+		submitText: input.submitText,
+		conditions: Array.isArray(input.conditions) ? input.conditions.slice(0, 20) : undefined,
+		linkSelector: input.linkSelector,
+		linkText: input.linkText,
 		key: input.key,
 		role: input.role,
 		label: input.label,
 		index: input.index,
 		maxPages: clampMaxPages(input.maxPages),
+		maxTabs: clampMaxTabs(input.maxTabs),
+		requiredFields: sanitizeStringList(input.requiredFields),
+		requiredTexts: sanitizeStringList(input.requiredTexts),
+		acknowledgement: input.acknowledgement,
 		nextSelector: input.nextSelector,
 		nextText: input.nextText,
 		extractSelectors: sanitizeSelectorMap(input.extractSelectors),
@@ -496,6 +621,28 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		direction: input.direction,
 		delta: input.delta,
 		options: Array.isArray(input.options) ? input.options.filter(Boolean) : undefined,
+		urlIncludes: sanitizeStringList(input.urlIncludes),
+		durationMs: clampDurationMs(input.durationMs),
+		maxEntries: clampMaxEntries(input.maxEntries),
+		tableSelector: input.tableSelector,
+		headerMode: input.headerMode,
+		outputFormat: input.outputFormat,
+		checkpointName: input.checkpointName,
+		includeFormState: input.includeFormState ?? true,
+		strictUrlMatch: input.strictUrlMatch ?? false,
+		reviewPrompt: input.reviewPrompt,
+		approvalKeyword: input.approvalKeyword,
+		itemSelector: input.itemSelector,
+		matchText: input.matchText,
+		matchMode: input.matchMode,
+		actionTemplate: input.actionTemplate,
+		maxItems: clampMaxItems(input.maxItems),
+		semanticConditions: sanitizeStringList(input.semanticConditions),
+		baseRunId: input.baseRunId,
+		newRunId: input.newRunId,
+		ignoreSelectors: sanitizeStringList(input.ignoreSelectors),
+		policyProfile: input.policyProfile,
+		onViolation: input.onViolation === 'warn' ? 'warn' : 'block',
 		wait: input.wait,
 		retries,
 		fallbackSelectors: sanitizeStringList(input.fallbackSelectors),
@@ -648,6 +795,47 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 			throw new Error('browserAct paginateCapture requires nextSelector or nextText.');
 		}
 	}
+
+	if (action === 'smartFormFill' && !step.formFields) {
+		throw new Error('browserAct smartFormFill requires formFields.');
+	}
+
+	if (action === 'conditionalWorkflow' && (!Array.isArray(step.conditions) || step.conditions.length === 0)) {
+		throw new Error('browserAct conditionalWorkflow requires conditions.');
+	}
+
+	if (action === 'multiTabCrawl' && !step.linkSelector && !step.linkText) {
+		throw new Error('browserAct multiTabCrawl requires linkSelector or linkText.');
+	}
+
+	if (action === 'safeDownloadAndHash' && !step.selector && !step.text && !step.label && !step.url) {
+		throw new Error('browserAct safeDownloadAndHash requires selector, text, label, or url.');
+	}
+
+	if ((action === 'stateCheckpoint' || action === 'rollbackToCheckpoint') && !step.checkpointName) {
+		throw new Error(`browserAct ${action} requires checkpointName.`);
+	}
+
+	if (action === 'humanReviewGate' && !step.approvalKeyword) {
+		throw new Error('browserAct humanReviewGate requires approvalKeyword.');
+	}
+
+	if (action === 'bulkActionFromList' && (!step.itemSelector || !step.actionTemplate?.action)) {
+		throw new Error('browserAct bulkActionFromList requires itemSelector and actionTemplate.action.');
+	}
+
+	if (action === 'semanticWait' && (!Array.isArray(step.semanticConditions) || step.semanticConditions.length === 0)) {
+		throw new Error('browserAct semanticWait requires semanticConditions.');
+	}
+
+	if (action === 'policyGuard' && !step.policyProfile) {
+		throw new Error('browserAct policyGuard requires policyProfile.');
+	}
+
+	const highRiskActions: BrowserAction[] = ['navigate', 'openInNewTab', 'closeTab', 'journeyCapture', 'paginateCapture', 'multiTabCrawl'];
+	if (highRiskActions.includes(action) && step.acknowledgement && step.acknowledgement !== 'CONFIRM_BROWSER_ACTION') {
+		throw new Error('Invalid acknowledgement value. Use CONFIRM_BROWSER_ACTION.');
+	}
 }
 
 function enqueueBrowserCommand(command: BrowserCommand) {
@@ -683,7 +871,7 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 	await appendBrowserActionLog(context, completion.id, completion, storedCapture);
 	clearTimeout(waiter.timeout);
 	browserCommandWaiters.delete(completion.id);
-	if (completion.ok === false && completion.error !== 'AUTH_REQUIRED') {
+	if (completion.ok === false && completion.error !== 'AUTH_REQUIRED' && completion.error !== 'REVIEW_REQUIRED') {
 		waiter.reject(new Error(completion.error ?? `Browser command failed: ${completion.id}`));
 	} else {
 		waiter.resolve(result);
@@ -724,6 +912,38 @@ function clampWaitAfterNavigateMs(value: number | undefined) {
 	return Math.min(Math.max(Math.trunc(value), 200), 10000);
 }
 
+function clampMaxTabs(maxTabs: number | undefined) {
+	if (typeof maxTabs !== 'number' || !Number.isFinite(maxTabs)) {
+		return 5;
+	}
+
+	return Math.min(Math.max(Math.trunc(maxTabs), 1), 30);
+}
+
+function clampDurationMs(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return 10000;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), 1000), 120000);
+}
+
+function clampMaxEntries(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return 30;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), 1), 200);
+}
+
+function clampMaxItems(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return 20;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), 1), 200);
+}
+
 function renderBrowserActMessage(command: BrowserCommand, completion: BrowserCommandCompletion) {
 	const authRequired = parseAuthRequiredResult(completion.result);
 	if (completion.error === 'AUTH_REQUIRED' || authRequired?.authRequired) {
@@ -733,6 +953,16 @@ function renderBrowserActMessage(command: BrowserCommand, completion: BrowserCom
 			authRequired?.visitedCount ? `Collected pages before pause: ${authRequired.visitedCount}` : undefined,
 			'브라우저에서 인증을 완료한 뒤, 채팅에 "완료"라고 입력해 주세요.',
 			'그 다음 Copilot이 #browserAct { "action": "resumeAfterAuth" } 호출로 이어서 진행합니다.'
+		].filter(Boolean) as string[];
+		return lines.join('\n');
+	}
+
+	const reviewRequired = parseReviewRequiredResult(completion.result);
+	if (completion.error === 'REVIEW_REQUIRED' || reviewRequired?.reviewRequired) {
+		const lines = [
+			`Browser action paused for manual review: ${command.action}`,
+			reviewRequired?.message ?? '승인 키워드 확인이 필요합니다.',
+			reviewRequired?.approvalKeyword ? `승인 키워드: ${reviewRequired.approvalKeyword}` : undefined
 		].filter(Boolean) as string[];
 		return lines.join('\n');
 	}
@@ -763,6 +993,15 @@ function parseAuthRequiredResult(result: unknown): AuthRequiredResult | undefine
 
 	const candidate = result as AuthRequiredResult;
 	return candidate.authRequired ? candidate : undefined;
+}
+
+function parseReviewRequiredResult(result: unknown): ReviewRequiredResult | undefined {
+	if (!result || typeof result !== 'object') {
+		return undefined;
+	}
+
+	const candidate = result as ReviewRequiredResult;
+	return candidate.reviewRequired ? candidate : undefined;
 }
 
 function createResumeBrowserCommand(context: vscode.ExtensionContext): BrowserCommand {

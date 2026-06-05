@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -156,7 +156,7 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "journeyCapture", "paginateCapture", "resumeAfterAuth", "runWorkflow"],
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "resumeAfterAuth", "runWorkflow"],
               "description": "Browser action to run. Defaults to readPage."
             },
             "selector": {
@@ -180,6 +180,32 @@
               "items": { "type": "string" },
               "description": "URL list for journeyCapture. Copilot can navigate each URL and collect per-page summaries."
             },
+            "formFields": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "Field name to value map for smartFormFill."
+            },
+            "submitSelector": {
+              "type": "string",
+              "description": "Submit button selector used by smartFormFill."
+            },
+            "submitText": {
+              "type": "string",
+              "description": "Submit button text used by smartFormFill when selector is omitted."
+            },
+            "conditions": {
+              "type": "array",
+              "description": "Conditional branches for conditionalWorkflow. Each item supports if/then/else steps.",
+              "items": { "type": "object" }
+            },
+            "linkSelector": {
+              "type": "string",
+              "description": "Link selector used by multiTabCrawl."
+            },
+            "linkText": {
+              "type": "string",
+              "description": "Link text filter used by multiTabCrawl."
+            },
             "key": {
               "type": "string",
               "description": "Keyboard key for keyPress actions, such as Enter, Escape, Tab, ArrowDown."
@@ -199,6 +225,24 @@
             "maxPages": {
               "type": "number",
               "description": "Maximum page count for journeyCapture or paginateCapture. Clamped to 1-30."
+            },
+            "maxTabs": {
+              "type": "number",
+              "description": "Maximum tabs/pages to crawl for multiTabCrawl. Clamped to 1-30."
+            },
+            "requiredFields": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Required extracted field names for dataGapGuard."
+            },
+            "requiredTexts": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Required visible-text snippets for dataGapGuard."
+            },
+            "acknowledgement": {
+              "type": "string",
+              "description": "Optional operator confirmation token for high-risk actions. Use CONFIRM_BROWSER_ACTION."
             },
             "nextSelector": {
               "type": "string",
@@ -273,6 +317,101 @@
               "type": "string",
               "description": "Optional group name for resulting captures."
             },
+            "urlIncludes": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "URL substring filters for networkTraceCapture."
+            },
+            "durationMs": {
+              "type": "number",
+              "description": "Capture duration budget for trace/download operations."
+            },
+            "maxEntries": {
+              "type": "number",
+              "description": "Maximum records returned by trace or extraction actions."
+            },
+            "tableSelector": {
+              "type": "string",
+              "description": "Target table selector for tableExtract. Defaults to the first table."
+            },
+            "headerMode": {
+              "type": "string",
+              "enum": ["auto", "thead", "firstRow"],
+              "description": "Header resolution mode for tableExtract."
+            },
+            "outputFormat": {
+              "type": "string",
+              "enum": ["json", "csv"],
+              "description": "Output format for tableExtract results."
+            },
+            "checkpointName": {
+              "type": "string",
+              "description": "Checkpoint name for stateCheckpoint and rollbackToCheckpoint."
+            },
+            "includeFormState": {
+              "type": "boolean",
+              "description": "Include form field values when creating a state checkpoint."
+            },
+            "strictUrlMatch": {
+              "type": "boolean",
+              "description": "When true, rollbackToCheckpoint fails if current URL does not match checkpoint URL."
+            },
+            "reviewPrompt": {
+              "type": "string",
+              "description": "Manual review instruction text for humanReviewGate."
+            },
+            "approvalKeyword": {
+              "type": "string",
+              "description": "Required approval keyword for humanReviewGate."
+            },
+            "itemSelector": {
+              "type": "string",
+              "description": "List item selector for bulkActionFromList."
+            },
+            "matchText": {
+              "type": "string",
+              "description": "Text filter for bulkActionFromList."
+            },
+            "matchMode": {
+              "type": "string",
+              "enum": ["includes", "equals", "regex"],
+              "description": "Match mode for bulkActionFromList text filtering."
+            },
+            "actionTemplate": {
+              "type": "object",
+              "description": "Template action applied to each matched item in bulkActionFromList."
+            },
+            "maxItems": {
+              "type": "number",
+              "description": "Maximum items processed by bulkActionFromList."
+            },
+            "semanticConditions": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Semantic wait expressions for semanticWait, e.g. text:, notText:, selector:, selectorGone:."
+            },
+            "baseRunId": {
+              "type": "string",
+              "description": "Base run id for compareCaptureRuns."
+            },
+            "newRunId": {
+              "type": "string",
+              "description": "Target run id for compareCaptureRuns."
+            },
+            "ignoreSelectors": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Selectors ignored during run comparison reports."
+            },
+            "policyProfile": {
+              "type": "string",
+              "description": "Policy profile name for policyGuard, such as strict, standard, investigation."
+            },
+            "onViolation": {
+              "type": "string",
+              "enum": ["block", "warn"],
+              "description": "Violation handling mode for policyGuard."
+            },
             "preset": {
               "type": "string",
               "enum": ["defenderIncidentSurvey", "defenderIncidentAlerts", "defenderIncidentEvidence"],
@@ -291,11 +430,15 @@
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": ["text", "element", "elementGone", "urlMatch", "spinnerGone"]
+                  "enum": ["text", "element", "elementGone", "urlMatch", "spinnerGone", "elementStable", "urlSettled", "composite", "semantic"]
                 },
                 "text": { "type": "string" },
                 "selector": { "type": "string" },
                 "urlPattern": { "type": "string" },
+                "semanticConditions": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
                 "pollIntervalMs": { "type": "number" }
               }
             }

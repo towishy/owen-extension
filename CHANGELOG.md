@@ -6,6 +6,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-06-05
+
+- Added 10 browser control actions for advanced investigations: `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, and `policyGuard`.
+- Extended `#browserAct` schema and runtime validation for checkpointing, semantic waits, policy profiles, manual review gates, and run-to-run comparison inputs.
+
 ## [0.1.7] - 2026-06-05
 
 - Added `journeyCapture` and `paginateCapture` browser actions for URL traversal and multi-page evidence collection under Copilot control.
