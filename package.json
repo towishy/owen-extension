@@ -1,0 +1,163 @@
+{
+  "name": "owen-browser-bridge",
+  "displayName": "Owen Browser Bridge",
+  "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
+  "version": "0.1.0",
+  "publisher": "towishy",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/towishy/owen-extension"
+  },
+  "engines": {
+    "vscode": "^1.120.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:owen-browser-bridge.startServer",
+    "onCommand:owen-browser-bridge.stopServer",
+    "onCommand:owen-browser-bridge.showLatestCapture",
+    "onCommand:owen-browser-bridge.openCapturesFolder",
+    "onCommand:owen-browser-bridge.copyPairingToken",
+    "onCommand:owen-browser-bridge.regeneratePairingToken",
+    "onLanguageModelTool:get_latest_browser_capture",
+    "onLanguageModelTool:read_browser_capture"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "owen-browser-bridge.startServer",
+        "title": "Owen Browser Bridge: Start Local Server"
+      },
+      {
+        "command": "owen-browser-bridge.stopServer",
+        "title": "Owen Browser Bridge: Stop Local Server"
+      },
+      {
+        "command": "owen-browser-bridge.showLatestCapture",
+        "title": "Owen Browser Bridge: Show Latest Capture"
+      },
+      {
+        "command": "owen-browser-bridge.openCapturesFolder",
+        "title": "Owen Browser Bridge: Open Captures Folder"
+      },
+      {
+        "command": "owen-browser-bridge.copyPairingToken",
+        "title": "Owen Browser Bridge: Copy Pairing Token"
+      },
+      {
+        "command": "owen-browser-bridge.regeneratePairingToken",
+        "title": "Owen Browser Bridge: Regenerate Pairing Token"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "get_latest_browser_capture",
+        "displayName": "Get Latest Browser Capture",
+        "userDescription": "Reads the latest browser capture received by Owen Browser Bridge.",
+        "modelDescription": "Use this tool when the user asks to analyze the current or latest browser, Defender portal, Entra portal, Azure portal, alert, screenshot, visible page text, or captured web page data. It returns the latest capture metadata, Markdown note, JSON payload, and screenshot path if available.",
+        "toolReferenceName": "getLatestBrowserCapture",
+        "tags": [
+          "browser",
+          "capture",
+          "screenshot",
+          "security",
+          "defender"
+        ],
+        "icon": "$(browser)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      {
+        "name": "read_browser_capture",
+        "displayName": "Read Browser Capture",
+        "userDescription": "Reads a stored browser capture by id or path.",
+        "modelDescription": "Use this tool to read a specific browser capture previously saved by Owen Browser Bridge. Provide either the capture id, JSON path, or Markdown path. It returns metadata, Markdown, JSON, and screenshot path if available.",
+        "toolReferenceName": "readBrowserCapture",
+        "tags": [
+          "browser",
+          "capture",
+          "screenshot",
+          "security",
+          "defender"
+        ],
+        "icon": "$(file-media)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "idOrPath": {
+              "type": "string",
+              "description": "Capture id, Markdown path, or JSON path. If omitted, the latest capture is returned."
+            }
+          },
+          "required": []
+        }
+      }
+    ],
+    "configuration": {
+      "title": "Owen Browser Bridge",
+      "properties": {
+        "owenBrowserBridge.port": {
+          "type": "number",
+          "default": 17321,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Localhost port used by the VS Code extension to receive browser captures."
+        },
+        "owenBrowserBridge.captureDirectory": {
+          "type": "string",
+          "default": "raw/browser-captures",
+          "description": "Workspace-relative folder where browser capture JSON, Markdown, and screenshots are stored."
+        },
+        "owenBrowserBridge.allowedHosts": {
+          "type": "array",
+          "default": [
+            "security.microsoft.com",
+            "security.microsoft365.com",
+            "entra.microsoft.com",
+            "portal.azure.com",
+            "*.microsoft.com"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Browser page hostnames that the bridge accepts. Use an empty array to accept any host. Supports exact hostnames and wildcard suffixes like *.microsoft.com."
+        },
+        "owenBrowserBridge.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the local browser capture server when VS Code finishes startup."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --no-dependencies",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.120.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.9.2",
+    "eslint": "^9.39.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
+  }
+}

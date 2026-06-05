@@ -1,0 +1,99 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f7f3ea;
+  --fg: #172033;
+  --muted: #667085;
+  --line: #d8cdbb;
+  --accent: #126c74;
+  --accent-fg: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111827;
+    --fg: #f8fafc;
+    --muted: #a7b0c0;
+    --line: #334155;
+    --accent: #2dd4bf;
+    --accent-fg: #06201d;
+  }
+}
+
+body {
+  width: 340px;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 "Segoe UI", sans-serif;
+}
+
+main {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 16px;
+}
+
+#status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.row {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  color: var(--fg);
+}
+
+input[type="number"],
+input[type="password"] {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 9px;
+  background: transparent;
+  color: var(--fg);
+}
+
+button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 650;
+}
+
+pre {
+  max-height: 120px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--muted);
+  font-size: 12px;
+}

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Owen Browser Capture</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Owen Capture</h1>
+        <span id="status" aria-live="polite">Ready</span>
+      </header>
+
+      <label>
+        VS Code Port
+        <input id="port" type="number" min="1024" max="65535" value="17321">
+      </label>
+
+      <label>
+        Pairing Token
+        <input id="token" type="password" autocomplete="off" placeholder="Paste token from VS Code">
+      </label>
+
+      <label class="row">
+        <input id="includeScreenshot" type="checkbox" checked>
+        <span>Include screenshot</span>
+      </label>
+
+      <label class="row">
+        <input id="includeHtml" type="checkbox">
+        <span>Include HTML snapshot</span>
+      </label>
+
+      <button id="save">Save Settings</button>
+      <button id="capture" class="primary">Send Current Tab</button>
+
+      <pre id="result"></pre>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Owen Browser Capture",
+  "description": "Send browser page text, metadata, and screenshots to Owen Browser Bridge in VS Code.",
+  "version": "0.0.1",
+  "action": {
+    "default_title": "Send to Owen Browser Bridge",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ]
+}
