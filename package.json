@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -144,7 +144,12 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package --no-dependencies",
+    "validate:browser": "node scripts/package-browser-extension.mjs --check",
+    "package:vsix": "vsce package --no-dependencies",
+    "package:browser": "node scripts/package-browser-extension.mjs",
+    "verify:release-assets": "node scripts/verify-release-assets.mjs",
+    "package": "npm run package:vsix && npm run package:browser && npm run verify:release-assets",
+    "release:check": "npm run compile && npm run lint && npm run package",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test"
@@ -156,6 +161,7 @@
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.9.2",
+    "adm-zip": "^0.5.17",
     "eslint": "^9.39.3",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1"

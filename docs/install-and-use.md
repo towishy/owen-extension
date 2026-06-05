@@ -9,14 +9,18 @@ This project contains both sides of the bridge:
 
 Use this section for a different Windows PC or a Mac.
 
-### Install the VS Code extension from GitHub Release
+### Install both extensions from GitHub Release
 
 1. Open <https://github.com/towishy/owen-extension/releases>.
-2. Download the latest `owen-browser-bridge-*.vsix` file.
+2. Download both release assets:
+  - `owen-browser-bridge-*.vsix`
+  - `owen-browser-capture-browser-extension-*.zip`
 3. In VS Code, press `Ctrl+Shift+P` on Windows/Linux or `Cmd+Shift+P` on macOS.
 4. Run `Extensions: Install from VSIX...`.
 5. Select the downloaded `.vsix` file.
-6. Run `Developer: Reload Window` if the commands do not appear immediately.
+6. Extract `owen-browser-capture-browser-extension-*.zip` to a local folder.
+7. Load the extracted browser extension folder in Edge or Chrome with **Load unpacked**.
+8. Run `Developer: Reload Window` if the VS Code commands do not appear immediately.
 
 ### Build and install from source
 
@@ -27,7 +31,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.0.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.1.vsix --force
 ```
 
 macOS terminal:
@@ -37,33 +41,34 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.0.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.1.vsix --force
 ```
 
 If `code` is unavailable, open VS Code and run `Shell Command: Install 'code' command in PATH`.
 
-### Install the browser extension from the cloned repo
+### Install the browser extension from release ZIP or cloned repo
 
-The browser extension is not installed by the VSIX. Load it from the cloned repository.
+The browser extension is not installed by the VSIX. Load it from the extracted release ZIP or the cloned repository.
 
 Microsoft Edge:
 
 1. Open `edge://extensions`.
 2. Enable **Developer mode**.
 3. Click **Load unpacked**.
-4. Select `browser-extension` from the cloned repo.
+4. Select the extracted release folder or `browser-extension` from the cloned repo.
 
 Google Chrome:
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Click **Load unpacked**.
-4. Select `browser-extension` from the cloned repo.
+4. Select the extracted release folder or `browser-extension` from the cloned repo.
 
 Common folder locations:
 
 - Windows: `C:\OWEN\github\owen-extension\browser-extension`
 - macOS: `~/github/owen-extension/browser-extension`
+- Release ZIP: the folder created after extracting `owen-browser-capture-browser-extension-*.zip`
 
 After this, continue with the pairing steps below.
 
@@ -203,3 +208,20 @@ https://github.com/towishy/owen-extension
 ```
 
 Do not commit `raw/browser-captures/`, screenshots, or customer/security investigation data.
+
+## 9. Release Checklist
+
+Before creating a GitHub Release, run:
+
+```powershell
+npm run release:check
+```
+
+This command verifies the browser extension manifest, compiles and lints the VS Code extension, builds the VSIX, builds the browser extension ZIP, and checks both release assets:
+
+- `owen-browser-bridge-<version>.vsix`
+- `owen-browser-capture-browser-extension-<version>.zip`
+
+Attach both files to the GitHub Release. The VSIX installs the VS Code side, and the ZIP is extracted and loaded as the unpacked Chrome/Edge browser extension.
+
+Pushing a `v*` tag also triggers `.github/workflows/release.yml`, which runs the same release check and uploads both assets automatically.

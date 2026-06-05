@@ -4,6 +4,12 @@ All notable changes to the "owen-browser-bridge" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.1] - 2026-06-05
+
+- Added release scripts that package and verify both the VSIX and browser extension ZIP.
+- Added release guidance for downloading the browser extension as a ZIP asset alongside the VSIX.
+- Updated Windows/macOS install commands for the v0.1.1 package.
+
 ## [0.1.0] - 2026-06-05
 
 - Added VS Code localhost capture server with pairing token authentication.
