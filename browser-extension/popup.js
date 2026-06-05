@@ -2,6 +2,7 @@ const DEFAULT_OPTIONS = {
   port: 17321,
   token: '',
   investigationName: '',
+  commandPolling: true,
   includeHtml: false,
   includeScreenshot: true
 };
@@ -10,6 +11,7 @@ const elements = {
   port: document.getElementById('port'),
   token: document.getElementById('token'),
   investigationName: document.getElementById('investigationName'),
+  commandPolling: document.getElementById('commandPolling'),
   includeHtml: document.getElementById('includeHtml'),
   includeScreenshot: document.getElementById('includeScreenshot'),
   save: document.getElementById('save'),
@@ -52,6 +54,7 @@ async function loadOptions() {
   elements.port.value = String(options.port);
   elements.token.value = options.token;
   elements.investigationName.value = options.investigationName;
+  elements.commandPolling.checked = options.commandPolling;
   elements.includeHtml.checked = options.includeHtml;
   elements.includeScreenshot.checked = options.includeScreenshot;
 }
@@ -61,6 +64,7 @@ async function saveOptions() {
     port: Number(elements.port.value || DEFAULT_OPTIONS.port),
     token: elements.token.value.trim(),
     investigationName: elements.investigationName.value.trim(),
+    commandPolling: elements.commandPolling.checked,
     includeHtml: elements.includeHtml.checked,
     includeScreenshot: elements.includeScreenshot.checked
   });

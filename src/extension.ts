@@ -50,9 +50,47 @@ type CaptureGroupSummary = {
 	captures: StoredCapture[];
 };
 
+type BrowserActInput = {
+	action?: 'readPage' | 'capture' | 'click' | 'type' | 'navigate' | 'waitForText';
+	selector?: string;
+	text?: string;
+	value?: string;
+	url?: string;
+	timeoutMs?: number;
+	captureAfter?: boolean;
+	includeScreenshot?: boolean;
+	includeHtml?: boolean;
+	investigationName?: string;
+};
+
+type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'captureAfter' | 'includeScreenshot' | 'includeHtml'>> & {
+	id: string;
+	createdAt: string;
+	selector?: string;
+	text?: string;
+	value?: string;
+	url?: string;
+	investigationName?: string;
+	allowedHosts: string[];
+};
+
+type BrowserCommandResult = {
+	id?: string;
+	ok?: boolean;
+	result?: unknown;
+	error?: string;
+	capture?: BrowserCapturePayload;
+};
+
+type BrowserCommandCompletion = BrowserCommandResult & {
+	storedCapture?: StoredCapture;
+};
+
 let server: http.Server | undefined;
 let output: vscode.OutputChannel;
 let setupPanel: vscode.WebviewPanel | undefined;
+const browserCommandQueue: BrowserCommand[] = [];
+const browserCommandWaiters = new Map<string, { resolve: (value: BrowserCommandCompletion) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }>();
 
 export async function activate(context: vscode.ExtensionContext) {
 	output = vscode.window.createOutputChannel('Owen Browser Bridge');
@@ -68,7 +106,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('owen-browser-bridge.regeneratePairingToken', async () => regeneratePairingToken(context)),
 		vscode.lm.registerTool('get_latest_browser_capture', createLatestCaptureTool(context)),
 		vscode.lm.registerTool('read_browser_capture', createReadCaptureTool(context)),
-		vscode.lm.registerTool('read_browser_capture_group', createReadCaptureGroupTool(context))
+		vscode.lm.registerTool('read_browser_capture_group', createReadCaptureGroupTool(context)),
+		vscode.lm.registerTool('browser_act', createBrowserActTool(context))
 	);
 
 	if (getConfig().get<boolean>('autoStart', true)) {
@@ -136,6 +175,27 @@ async function handleRequest(context: vscode.ExtensionContext, request: http.Inc
 
 	if (request.url === '/health' && request.method === 'GET') {
 		writeJson(response, 200, { ok: true, service: 'owen-browser-bridge' });
+		return;
+	}
+
+	if (request.url === '/commands/next' && request.method === 'GET') {
+		if (!await isAuthorized(context, request)) {
+			writeJson(response, 401, { error: 'unauthorized' });
+			return;
+		}
+
+		writeJson(response, 200, { command: browserCommandQueue.shift() ?? null });
+		return;
+	}
+
+	if (request.url === '/commands/result' && request.method === 'POST') {
+		if (!await isAuthorized(context, request)) {
+			writeJson(response, 401, { error: 'unauthorized' });
+			return;
+		}
+
+		const completion = await completeBrowserCommand(context, JSON.parse(await readBody(request)) as BrowserCommandResult);
+		writeJson(response, 200, { ok: true, storedCapture: completion.storedCapture });
 		return;
 	}
 
@@ -265,6 +325,132 @@ function createReadCaptureGroupTool(context: vscode.ExtensionContext): vscode.La
 			return { invocationMessage: `Reading browser capture group ${options.input.group ?? 'latest'}` };
 		}
 	};
+}
+
+function createBrowserActTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<BrowserActInput> {
+	return {
+		async invoke(options) {
+			const command = createBrowserCommand(options.input);
+			const completion = await enqueueBrowserCommand(command);
+			return new vscode.LanguageModelToolResult([
+				vscode.LanguageModelDataPart.json({ command, completion }),
+				vscode.LanguageModelDataPart.text(renderBrowserActMessage(command, completion), 'text/plain')
+			]);
+		},
+		prepareInvocation(options) {
+			return { invocationMessage: `Controlling paired browser: ${options.input.action ?? 'readPage'}` };
+		}
+	};
+}
+
+function createBrowserCommand(input: BrowserActInput): BrowserCommand {
+	const action = input.action ?? 'readPage';
+	const timeoutMs = clampTimeout(input.timeoutMs);
+	if (!['readPage', 'capture', 'click', 'type', 'navigate', 'waitForText'].includes(action)) {
+		throw new Error(`Unsupported browser action: ${String(action)}`);
+	}
+
+	if (action === 'navigate') {
+		const pageUrl = parseUrl(input.url);
+		if (!pageUrl) {
+			throw new Error('browserAct navigate requires a valid url.');
+		}
+
+		const allowedHosts = getConfig().get<string[]>('allowedHosts', []);
+		if (allowedHosts.length > 0 && !isAllowedHost(pageUrl.hostname, allowedHosts)) {
+			throw new Error(`Navigation host is not allowed: ${pageUrl.hostname}`);
+		}
+	}
+
+	if (action === 'click' && !input.selector && !input.text) {
+		throw new Error('browserAct click requires selector or text.');
+	}
+
+	if (action === 'type' && (!input.selector || typeof input.value !== 'string')) {
+		throw new Error('browserAct type requires selector and value.');
+	}
+
+	if (action === 'waitForText' && !input.text) {
+		throw new Error('browserAct waitForText requires text.');
+	}
+
+	return {
+		id: `command-${formatTimestamp(new Date().toISOString())}-${crypto.randomBytes(3).toString('hex')}`,
+		action,
+		createdAt: new Date().toISOString(),
+		selector: input.selector,
+		text: input.text,
+		value: action === 'type' ? input.value : undefined,
+		url: input.url,
+		timeoutMs,
+		captureAfter: input.captureAfter ?? true,
+		includeScreenshot: input.includeScreenshot ?? true,
+		includeHtml: input.includeHtml ?? false,
+		investigationName: input.investigationName,
+		allowedHosts: getConfig().get<string[]>('allowedHosts', [])
+	};
+}
+
+function enqueueBrowserCommand(command: BrowserCommand) {
+	browserCommandQueue.push(command);
+	output.appendLine(`Queued browser command ${command.id}: ${command.action}`);
+	return new Promise<BrowserCommandCompletion>((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			browserCommandWaiters.delete(command.id);
+			reject(new Error(`Timed out waiting for paired browser command result: ${command.id}`));
+		}, command.timeoutMs + 35000);
+		browserCommandWaiters.set(command.id, { resolve, reject, timeout });
+	});
+}
+
+async function completeBrowserCommand(context: vscode.ExtensionContext, completion: BrowserCommandResult): Promise<BrowserCommandCompletion> {
+	if (!completion.id) {
+		throw new Error('Browser command result is missing id.');
+	}
+
+	const waiter = browserCommandWaiters.get(completion.id);
+	if (!waiter) {
+		return completion;
+	}
+
+	let storedCapture: StoredCapture | undefined;
+	if (completion.capture) {
+		storedCapture = await storeCapture(context, completion.capture);
+		await context.globalState.update('latestCapture', storedCapture);
+	}
+
+	const result = { ...completion, storedCapture };
+	clearTimeout(waiter.timeout);
+	browserCommandWaiters.delete(completion.id);
+	if (completion.ok === false) {
+		waiter.reject(new Error(completion.error ?? `Browser command failed: ${completion.id}`));
+	} else {
+		waiter.resolve(result);
+	}
+
+	return result;
+}
+
+function clampTimeout(timeoutMs: number | undefined) {
+	if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs)) {
+		return 60000;
+	}
+
+	return Math.min(Math.max(Math.trunc(timeoutMs), 1000), 120000);
+}
+
+function renderBrowserActMessage(command: BrowserCommand, completion: BrowserCommandCompletion) {
+	const lines = [
+		`Browser action completed: ${command.action}`,
+		`Command: ${command.id}`
+	];
+	if (completion.storedCapture) {
+		lines.push(`Stored capture: ${completion.storedCapture.markdownPath}`);
+	}
+	if (completion.result) {
+		lines.push(`Result: ${JSON.stringify(completion.result).slice(0, 4000)}`);
+	}
+	return lines.join('\n');
 }
 
 async function captureToolResult(capture: StoredCapture) {

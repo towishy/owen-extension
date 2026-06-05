@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -26,7 +26,8 @@
     "onCommand:owen-browser-bridge.regeneratePairingToken",
     "onLanguageModelTool:get_latest_browser_capture",
     "onLanguageModelTool:read_browser_capture",
-    "onLanguageModelTool:read_browser_capture_group"
+    "onLanguageModelTool:read_browser_capture_group",
+    "onLanguageModelTool:browser_act"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -130,6 +131,69 @@
             "group": {
               "type": "string",
               "description": "Host, host/group folder, workspace-relative folder, absolute folder, or omitted to read the latest capture group. Examples: security.microsoft.com, security.microsoft.com/incident-12345."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "browser_act",
+        "displayName": "Control Paired Browser",
+        "userDescription": "Sends a safe action to the paired browser and returns the resulting page state.",
+        "modelDescription": "Use this tool when the user asks Copilot to control the paired browser, navigate an allowed host, click visible UI, type non-secret text, wait for text, read the page, or capture the current state. Actions are executed by the paired browser extension through the local command queue and are limited to allowed hosts.",
+        "toolReferenceName": "browserAct",
+        "tags": [
+          "browser",
+          "automation",
+          "capture",
+          "security",
+          "defender"
+        ],
+        "icon": "$(debug-start)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText"],
+              "description": "Browser action to run. Defaults to readPage."
+            },
+            "selector": {
+              "type": "string",
+              "description": "CSS selector for click or type actions."
+            },
+            "text": {
+              "type": "string",
+              "description": "Visible text to click or wait for."
+            },
+            "value": {
+              "type": "string",
+              "description": "Non-secret text to type. Password fields are refused."
+            },
+            "url": {
+              "type": "string",
+              "description": "Allowed URL for navigate actions."
+            },
+            "timeoutMs": {
+              "type": "number",
+              "description": "Timeout in milliseconds, clamped between 1000 and 120000."
+            },
+            "captureAfter": {
+              "type": "boolean",
+              "description": "Capture the resulting page state after the action. Defaults to true."
+            },
+            "includeScreenshot": {
+              "type": "boolean",
+              "description": "Include a screenshot in the resulting capture. Defaults to true."
+            },
+            "includeHtml": {
+              "type": "boolean",
+              "description": "Include an HTML snapshot in the resulting capture. Defaults to false."
+            },
+            "investigationName": {
+              "type": "string",
+              "description": "Optional group name for resulting captures."
             }
           },
           "required": []

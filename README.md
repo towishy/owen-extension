@@ -48,7 +48,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.3.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.4.vsix --force
 ```
 
 macOS terminal:
@@ -58,7 +58,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.3.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.4.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -112,8 +112,9 @@ If the token ever needs to be replaced, click **Regenerate and Copy Token** and 
 3. Confirm `VS Code Port` is `17321` unless you changed the VS Code setting.
 4. Paste the copied token into **Pairing Token**.
 5. Optionally enter an **Investigation / Case** name such as `incident-12345` to group multiple tab captures together.
-6. Choose whether to include **screenshot** and **HTML snapshot**.
-7. Click **Save Settings**.
+6. Keep **Accept Copilot browser actions** enabled if you want Copilot to send safe browser actions through the paired extension.
+7. Choose whether to include **screenshot** and **HTML snapshot**.
+8. Click **Save Settings**.
 
 ### 4. Send a browser page to VS Code
 
@@ -141,11 +142,12 @@ Open `Owen Browser Bridge: Open Setup Page`, then use **Capture Directory** to s
 
 ## Copilot Integration
 
-The VS Code extension contributes two Language Model Tools:
+The VS Code extension contributes these Language Model Tools:
 
 - `#getLatestBrowserCapture`: returns the latest received browser capture
 - `#readBrowserCapture`: returns a capture by id, Markdown path, or JSON path
 - `#readBrowserCaptureGroup`: returns every capture in a host or investigation group for correlation
+- `#browserAct`: sends a safe action to the paired browser and returns the resulting page state
 
 Example Copilot prompts:
 
@@ -164,6 +166,14 @@ For multi-tab Defender or portal investigations:
 ```
 
 You can also omit the group to analyze the latest capture group, or pass only a host such as `security.microsoft.com` to read that host's newest group.
+
+For paired browser control on allowed hosts:
+
+```text
+#browserAct { "action": "click", "text": "Evidence", "investigationName": "incident-12345" } Defender 인시던트의 Evidence 탭을 열고 결과 화면을 캡처해줘.
+```
+
+Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
 Copilot can also read the generated Markdown/JSON/PNG files directly from the workspace.
 
@@ -214,7 +224,9 @@ When a `v*` tag is pushed to GitHub, `.github/workflows/release.yml` runs the sa
 
 - The server binds to `127.0.0.1` only.
 - Browser requests require the pairing token stored in VS Code SecretStorage.
+- Copilot browser actions require the same pairing token and the browser popup's **Accept Copilot browser actions** toggle.
 - Default allowed hosts are Microsoft security/admin portals.
+- Browser actions are limited to allowed hosts and refuse to type into password fields.
 - Email addresses, IPv4 addresses, GUIDs, and bearer tokens are redacted before storage.
 - Raw captures can still contain sensitive business/security context. Keep `raw/browser-captures/` out of git.
 

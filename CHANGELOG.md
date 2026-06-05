@@ -4,6 +4,14 @@ All notable changes to the "owen-browser-bridge" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.4] - 2026-06-05
+
+- Added paired browser command polling from the Chrome/Edge extension to VS Code.
+- Added `#browserAct` for Copilot-driven read, capture, navigate, click, type, and wait-for-text actions on allowed hosts.
+- Added automatic post-action captures so browser actions leave evidence in the current investigation group.
+- Added a browser popup toggle for accepting Copilot browser actions.
+- Added safety checks for allowed hosts and password fields during browser control.
+
 ## [0.1.3] - 2026-06-05
 
 - Added host and investigation-group capture folders for related multi-page investigations.

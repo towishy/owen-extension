@@ -31,7 +31,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.3.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.4.vsix --force
 ```
 
 macOS terminal:
@@ -41,7 +41,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.3.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.4.vsix --force
 ```
 
 If `code` is unavailable, open VS Code and run `Shell Command: Install 'code' command in PATH`.
@@ -118,8 +118,9 @@ The local server listens on `http://127.0.0.1:17321` by default.
 7. Keep `VS Code Port` as `17321`, unless you changed `owenBrowserBridge.port`.
 8. Paste the copied token into **Pairing Token**.
 9. Optionally enter an **Investigation / Case** name such as `incident-12345` when you plan to capture several tabs for the same investigation.
-10. Select whether to include **screenshot** and **HTML snapshot**.
-11. Click **Save Settings**.
+10. Keep **Accept Copilot browser actions** enabled if you want Copilot to control the paired browser on allowed hosts.
+11. Select whether to include **screenshot** and **HTML snapshot**.
+12. Click **Save Settings**.
 
 If you need to rotate the token, click **Regenerate and Copy Token** on the setup page, then paste the new token into the browser extension and click **Save Settings** again.
 
@@ -164,6 +165,14 @@ For all captures in a related host or investigation group:
 ```
 
 If you omit the group, `#readBrowserCaptureGroup` reads the latest capture group. If you pass only a host such as `security.microsoft.com`, it reads that host's newest group.
+
+For paired browser control:
+
+```text
+#browserAct { "action": "click", "text": "Evidence", "investigationName": "incident-12345" } Evidence 탭을 열고 결과 화면을 캡처해줘.
+```
+
+`#browserAct` supports `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. Actions are delivered through the paired browser extension, limited to **Allowed Hosts**, and capture the resulting page by default.
 
 If tool reference is unavailable in your Copilot Chat build, open the generated Markdown file and ask Copilot to analyze the current file plus adjacent JSON/PNG capture assets.
 
@@ -222,6 +231,13 @@ Open `Owen Browser Bridge: Open Setup Page` and add that page's hostname under *
 3. Paste the token into the browser popup.
 4. Click **Save Settings**.
 5. Try **Send Current Tab** again.
+
+### `#browserAct` times out
+
+1. Confirm the browser extension popup has **Accept Copilot browser actions** enabled.
+2. Confirm the pairing token and port are saved in the browser popup.
+3. Keep an allowed Chrome/Edge tab active while Copilot waits for the action result.
+4. The extension polls for commands about every 30 seconds, so short delays are expected.
 
 ### Browser popup shows `Cannot access a chrome:// URL`
 
