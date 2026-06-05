@@ -31,7 +31,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.6.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.7.vsix --force
 ```
 
 macOS terminal:
@@ -41,7 +41,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.6.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.7.vsix --force
 ```
 
 If `code` is unavailable, open VS Code and run `Shell Command: Install 'code' command in PATH`.
@@ -174,11 +174,32 @@ For paired browser control:
 
 `#browserAct` supports `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. Actions are delivered through the paired browser extension, limited to **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are available for richer automation: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, and `runWorkflow`.
+Advanced actions are available for richer automation: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` also supports resilient workflow inputs: `preset`, `steps`, `retries`, `fallbackSelectors`, and `fallbackTexts`.
+`#browserAct` also supports resilient workflow and traversal inputs: `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `urls`, `maxPages`, `nextSelector`, `nextText`, and `extractSelectors`.
+
+URL traversal example:
+
+```text
+#browserAct {
+  "action": "journeyCapture",
+  "urls": ["https://security.microsoft.com/incidents", "https://security.microsoft.com/incidents/12345"],
+  "maxPages": 2,
+  "extractSelectors": {
+    "incidentId": "[data-testid='incident-id']",
+    "status": "[data-testid='status']"
+  },
+  "investigationName": "incident-12345"
+} 이 URL들을 순차 방문해서 캡처/핵심필드 수집 후 분석해줘.
+```
 
 For safety, `closeTab` is blocked unless `confirmDangerous: true` is explicitly provided.
+
+If the browser is redirected to an authentication page during automation, the action pauses. Complete sign-in in the same browser tab, then type `완료` in Copilot Chat and run:
+
+```text
+#browserAct { "action": "resumeAfterAuth" }
+```
 
 If tool reference is unavailable in your Copilot Chat build, open the generated Markdown file and ask Copilot to analyze the current file plus adjacent JSON/PNG capture assets.
 

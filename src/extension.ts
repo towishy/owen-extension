@@ -64,10 +64,16 @@ type BrowserStepInput = {
 	text?: string;
 	value?: string;
 	url?: string;
+	urls?: string[];
 	key?: string;
 	role?: string;
 	label?: string;
 	index?: number;
+	maxPages?: number;
+	nextSelector?: string;
+	nextText?: string;
+	extractSelectors?: Record<string, string>;
+	waitAfterNavigateMs?: number;
 	direction?: 'up' | 'down';
 	delta?: number;
 	options?: string[];
@@ -105,6 +111,9 @@ type BrowserAction =
 	| 'switchTab'
 	| 'closeTab'
 	| 'listInteractables'
+	| 'journeyCapture'
+	| 'paginateCapture'
+	| 'resumeAfterAuth'
 	| 'runWorkflow';
 
 type BrowserActInput = BrowserStepInput & {
@@ -120,10 +129,16 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	text?: string;
 	value?: string;
 	url?: string;
+	urls?: string[];
 	key?: string;
 	role?: string;
 	label?: string;
 	index?: number;
+	maxPages?: number;
+	nextSelector?: string;
+	nextText?: string;
+	extractSelectors?: Record<string, string>;
+	waitAfterNavigateMs?: number;
 	direction?: 'up' | 'down';
 	delta?: number;
 	options?: string[];
@@ -149,6 +164,15 @@ type BrowserCommandResult = {
 
 type BrowserCommandCompletion = BrowserCommandResult & {
 	storedCapture?: StoredCapture;
+};
+
+type AuthRequiredResult = {
+	authRequired?: boolean;
+	authUrl?: string;
+	message?: string;
+	resumeInput?: BrowserActInput;
+	pages?: unknown[];
+	visitedCount?: number;
 };
 
 let server: http.Server | undefined;
@@ -395,8 +419,15 @@ function createReadCaptureGroupTool(context: vscode.ExtensionContext): vscode.La
 function createBrowserActTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<BrowserActInput> {
 	return {
 		async invoke(options) {
-			const command = createBrowserCommand(options.input);
+			const resumeRequested = (options.input.action as BrowserAction | undefined) === 'resumeAfterAuth';
+			const command = resumeRequested
+				? createResumeBrowserCommand(context)
+				: createBrowserCommand(options.input);
 			const completion = await enqueueBrowserCommand(command);
+			const authRequired = parseAuthRequiredResult(completion.result);
+			if (authRequired?.authRequired && authRequired.resumeInput) {
+				await context.globalState.update('pendingAuthResumeInput', authRequired.resumeInput);
+			}
 			return new vscode.LanguageModelToolResult([
 				vscode.LanguageModelDataPart.json({ command, completion }),
 				vscode.LanguageModelDataPart.text(renderBrowserActMessage(command, completion), 'text/plain')
@@ -411,7 +442,7 @@ function createBrowserActTool(context: vscode.ExtensionContext): vscode.Language
 const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'readPage', 'capture', 'click', 'type', 'navigate', 'waitForText', 'wait', 'scroll', 'hover', 'keyPress',
 	'selectOption', 'clearInput', 'back', 'forward', 'reload', 'openInNewTab', 'switchTab', 'closeTab',
-	'listInteractables', 'runWorkflow'
+	'listInteractables', 'journeyCapture', 'paginateCapture', 'resumeAfterAuth', 'runWorkflow'
 ];
 
 const DESTRUCTIVE_BROWSER_ACTIONS: BrowserAction[] = ['closeTab'];
@@ -440,6 +471,10 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		throw new Error('browserAct runWorkflow requires preset or steps.');
 	}
 
+	if (action === 'resumeAfterAuth') {
+		throw new Error('browserAct resumeAfterAuth must be invoked without additional inputs.');
+	}
+
 	return {
 		id: `command-${formatTimestamp(new Date().toISOString())}-${crypto.randomBytes(3).toString('hex')}`,
 		action,
@@ -448,10 +483,16 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		text: input.text,
 		value: input.value,
 		url: input.url,
+		urls: sanitizeStringList(input.urls),
 		key: input.key,
 		role: input.role,
 		label: input.label,
 		index: input.index,
+		maxPages: clampMaxPages(input.maxPages),
+		nextSelector: input.nextSelector,
+		nextText: input.nextText,
+		extractSelectors: sanitizeSelectorMap(input.extractSelectors),
+		waitAfterNavigateMs: clampWaitAfterNavigateMs(input.waitAfterNavigateMs),
 		direction: input.direction,
 		delta: input.delta,
 		options: Array.isArray(input.options) ? input.options.filter(Boolean) : undefined,
@@ -488,6 +529,23 @@ function sanitizeStringList(values: string[] | undefined) {
 	}
 
 	return values.map(item => item.trim()).filter(Boolean).slice(0, 10);
+}
+
+function sanitizeSelectorMap(values: Record<string, string> | undefined) {
+	if (!values || typeof values !== 'object') {
+		return undefined;
+	}
+
+	const entries = Object.entries(values)
+		.filter(([key, value]) => key.trim().length > 0 && typeof value === 'string' && value.trim().length > 0)
+		.slice(0, 20)
+		.map(([key, value]) => [key.trim(), value.trim()] as const);
+
+	if (entries.length === 0) {
+		return undefined;
+	}
+
+	return Object.fromEntries(entries);
 }
 
 function expandPreset(preset: BrowserPreset | undefined): BrowserStepInput[] {
@@ -564,6 +622,32 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 	if (action === 'runWorkflow' && !topLevel) {
 		throw new Error('runWorkflow can only be used as the top-level action.');
 	}
+
+	if (action === 'resumeAfterAuth') {
+		throw new Error('resumeAfterAuth can only be used as a top-level action.');
+	}
+
+	if (action === 'journeyCapture') {
+		if (!Array.isArray(step.urls) || step.urls.length === 0) {
+			throw new Error('browserAct journeyCapture requires urls.');
+		}
+
+		for (const targetUrl of step.urls) {
+			const pageUrl = parseUrl(targetUrl);
+			if (!pageUrl) {
+				throw new Error(`browserAct journeyCapture requires valid urls. Invalid: ${targetUrl}`);
+			}
+			if (allowedHosts.length > 0 && !isAllowedHost(pageUrl.hostname, allowedHosts)) {
+				throw new Error(`Navigation host is not allowed: ${pageUrl.hostname}`);
+			}
+		}
+	}
+
+	if (action === 'paginateCapture') {
+		if (!step.nextSelector && !step.nextText) {
+			throw new Error('browserAct paginateCapture requires nextSelector or nextText.');
+		}
+	}
 }
 
 function enqueueBrowserCommand(command: BrowserCommand) {
@@ -599,7 +683,7 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 	await appendBrowserActionLog(context, completion.id, completion, storedCapture);
 	clearTimeout(waiter.timeout);
 	browserCommandWaiters.delete(completion.id);
-	if (completion.ok === false) {
+	if (completion.ok === false && completion.error !== 'AUTH_REQUIRED') {
 		waiter.reject(new Error(completion.error ?? `Browser command failed: ${completion.id}`));
 	} else {
 		waiter.resolve(result);
@@ -624,7 +708,35 @@ function clampRetries(retries: number | undefined) {
 	return Math.min(Math.max(Math.trunc(retries), 0), 3);
 }
 
+function clampMaxPages(maxPages: number | undefined) {
+	if (typeof maxPages !== 'number' || !Number.isFinite(maxPages)) {
+		return 5;
+	}
+
+	return Math.min(Math.max(Math.trunc(maxPages), 1), 30);
+}
+
+function clampWaitAfterNavigateMs(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return 1200;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), 200), 10000);
+}
+
 function renderBrowserActMessage(command: BrowserCommand, completion: BrowserCommandCompletion) {
+	const authRequired = parseAuthRequiredResult(completion.result);
+	if (completion.error === 'AUTH_REQUIRED' || authRequired?.authRequired) {
+		const lines = [
+			`Browser action paused for authentication: ${command.action}`,
+			authRequired?.authUrl ? `Auth URL: ${authRequired.authUrl}` : undefined,
+			authRequired?.visitedCount ? `Collected pages before pause: ${authRequired.visitedCount}` : undefined,
+			'브라우저에서 인증을 완료한 뒤, 채팅에 "완료"라고 입력해 주세요.',
+			'그 다음 Copilot이 #browserAct { "action": "resumeAfterAuth" } 호출로 이어서 진행합니다.'
+		].filter(Boolean) as string[];
+		return lines.join('\n');
+	}
+
 	const lines = [
 		`Browser action completed: ${command.action}`,
 		`Command: ${command.id}`
@@ -642,6 +754,24 @@ function renderBrowserActMessage(command: BrowserCommand, completion: BrowserCom
 		lines.push(`Result: ${JSON.stringify(completion.result).slice(0, 4000)}`);
 	}
 	return lines.join('\n');
+}
+
+function parseAuthRequiredResult(result: unknown): AuthRequiredResult | undefined {
+	if (!result || typeof result !== 'object') {
+		return undefined;
+	}
+
+	const candidate = result as AuthRequiredResult;
+	return candidate.authRequired ? candidate : undefined;
+}
+
+function createResumeBrowserCommand(context: vscode.ExtensionContext): BrowserCommand {
+	const resumeInput = context.globalState.get<BrowserActInput>('pendingAuthResumeInput');
+	if (!resumeInput) {
+		throw new Error('No pending auth-resume command exists. Start a browserAct action first.');
+	}
+
+	return createBrowserCommand(resumeInput);
 }
 
 async function appendBrowserActionLog(context: vscode.ExtensionContext, commandId: string, completion: BrowserCommandResult, storedCapture: StoredCapture | undefined) {

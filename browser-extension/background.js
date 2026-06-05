@@ -94,7 +94,15 @@ async function executeBrowserCommand(command, options) {
       capture
     };
   } catch (error) {
-    return { id: command.id, ok: false, error: String(error?.message ?? error) };
+    const message = String(error?.message ?? error);
+    const authPrefix = 'AUTH_REQUIRED::';
+    if (message.startsWith(authPrefix)) {
+      const payloadText = message.slice(authPrefix.length);
+      const payload = JSON.parse(payloadText);
+      return { id: command.id, ok: false, error: 'AUTH_REQUIRED', result: payload };
+    }
+
+    return { id: command.id, ok: false, error: message };
   }
 }
 
@@ -108,6 +116,14 @@ function normalizeWorkflowSteps(steps) {
 
 async function executeSingleAction(command, allowedHosts) {
   const action = command.action ?? 'readPage';
+
+  if (action === 'journeyCapture') {
+    return runJourneyCapture(command, allowedHosts);
+  }
+
+  if (action === 'paginateCapture') {
+    return runPaginateCapture(command, allowedHosts);
+  }
 
   if (action === 'navigate') {
     assertAllowedUrl(command.url, allowedHosts);
@@ -196,6 +212,180 @@ async function executeSingleAction(command, allowedHosts) {
   }
 
   throw new Error(lastError);
+}
+
+async function runJourneyCapture(command, allowedHosts) {
+  const urls = Array.isArray(command.urls) ? command.urls.filter(Boolean).slice(0, Math.max(1, Number(command.maxPages) || 5)) : [];
+  if (urls.length === 0) {
+    throw new Error('journeyCapture requires urls.');
+  }
+
+  const pages = [];
+  for (let i = 0; i < urls.length; i += 1) {
+    const url = urls[i];
+    assertAllowedUrl(url, allowedHosts);
+    const tab = await getActiveTab();
+    await chrome.tabs.update(tab.id, { url });
+    await waitForTabComplete(tab.id, command.timeoutMs);
+    const authState = await detectAuthRequired(tab.id);
+    if (authState?.authRequired) {
+      throw new Error(`AUTH_REQUIRED::${JSON.stringify({
+        authRequired: true,
+        authUrl: authState.authUrl,
+        message: 'Authentication is required in the browser tab before capture can continue.',
+        pages,
+        visitedCount: pages.length,
+        resumeInput: {
+          action: 'journeyCapture',
+          urls: urls.slice(i),
+          maxPages: Math.max(1, Number(command.maxPages) || 5),
+          extractSelectors: command.extractSelectors,
+          timeoutMs: command.timeoutMs,
+          includeScreenshot: command.includeScreenshot,
+          includeHtml: command.includeHtml,
+          captureAfter: command.captureAfter,
+          investigationName: command.investigationName
+        }
+      })}`);
+    }
+
+    const summary = await collectTabSummary(tab.id, command.extractSelectors);
+    pages.push(summary);
+  }
+
+  return {
+    ok: true,
+    pages,
+    visitedCount: pages.length
+  };
+}
+
+async function runPaginateCapture(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+
+  const maxPages = Math.min(Math.max(Number(command.maxPages) || 5, 1), 30);
+  const pages = [];
+  const seenKeys = new Set();
+
+  for (let i = 0; i < maxPages; i += 1) {
+    const authState = await detectAuthRequired(tab.id);
+    if (authState?.authRequired) {
+      throw new Error(`AUTH_REQUIRED::${JSON.stringify({
+        authRequired: true,
+        authUrl: authState.authUrl,
+        message: 'Authentication is required in the browser tab before pagination capture can continue.',
+        pages,
+        visitedCount: pages.length,
+        resumeInput: {
+          action: 'paginateCapture',
+          nextSelector: command.nextSelector,
+          nextText: command.nextText,
+          maxPages: Math.max(1, maxPages - i),
+          extractSelectors: command.extractSelectors,
+          wait: command.wait,
+          waitAfterNavigateMs: command.waitAfterNavigateMs,
+          timeoutMs: command.timeoutMs,
+          includeScreenshot: command.includeScreenshot,
+          includeHtml: command.includeHtml,
+          captureAfter: command.captureAfter,
+          investigationName: command.investigationName
+        }
+      })}`);
+    }
+
+    const page = await collectTabSummary(tab.id, command.extractSelectors);
+    const dedupeKey = `${page.url}|${page.title}|${page.visibleTextLength}`;
+    if (seenKeys.has(dedupeKey)) {
+      return { ok: true, pages, visitedCount: pages.length, stoppedReason: 'duplicate-page-detected' };
+    }
+
+    seenKeys.add(dedupeKey);
+    pages.push(page);
+
+    const [{ result: nextResult }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: runDomCommand,
+      args: [{ action: 'click', selector: command.nextSelector, text: command.nextText, label: command.nextText, timeoutMs: command.timeoutMs }]
+    });
+    if (nextResult?.error) {
+      return { ok: true, pages, visitedCount: pages.length, stoppedReason: `next-not-found: ${nextResult.error}` };
+    }
+
+    await sleep(Number(command.waitAfterNavigateMs) || 1200);
+    const [{ result: waitResult }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: runDomCommand,
+      args: [{ action: 'wait', wait: command.wait ?? { kind: 'spinnerGone' }, timeoutMs: command.timeoutMs }]
+    });
+    if (waitResult?.error) {
+      return { ok: true, pages, visitedCount: pages.length, stoppedReason: `wait-timeout: ${waitResult.error}` };
+    }
+  }
+
+  return { ok: true, pages, visitedCount: pages.length, stoppedReason: 'max-pages-reached' };
+}
+
+async function collectTabSummary(tabId, extractSelectors) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (selectors) => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const visibleText = normalize(document.body?.innerText ?? '');
+      const headings = Array.from(document.querySelectorAll('h1,h2,h3')).slice(0, 20).map(element => normalize(element.innerText)).filter(Boolean);
+      const buttons = Array.from(document.querySelectorAll('button,[role="button"],a')).slice(0, 60).map(element => normalize(element.innerText || element.getAttribute('aria-label') || '')).filter(Boolean);
+      const extracted = {};
+      if (selectors && typeof selectors === 'object') {
+        for (const [field, selector] of Object.entries(selectors)) {
+          try {
+            const element = document.querySelector(String(selector));
+            extracted[field] = normalize(element?.innerText || element?.textContent || element?.value || '');
+          } catch {
+            extracted[field] = '';
+          }
+        }
+      }
+
+      return {
+        collectedAt: new Date().toISOString(),
+        url: location.href,
+        title: document.title,
+        visibleTextLength: visibleText.length,
+        headings,
+        buttons: buttons.slice(0, 30),
+        extracted
+      };
+    },
+    args: [extractSelectors]
+  });
+
+  if (!result) {
+    throw new Error('Failed to collect tab summary.');
+  }
+
+  return result;
+}
+
+function sleep(ms) {
+  const duration = Math.min(Math.max(Number(ms) || 0, 0), 10000);
+  return new Promise(resolve => setTimeout(resolve, duration));
+}
+
+async function detectAuthRequired(tabId) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const href = location.href;
+      const host = location.hostname.toLowerCase();
+      const authHost = host.includes('login.microsoftonline.com') || host.includes('signin') || host.includes('auth');
+      const hasPasswordField = Boolean(document.querySelector('input[type="password"]'));
+      const hasSignInText = /sign in|signin|로그인|인증/i.test((document.body?.innerText || '').slice(0, 3000));
+      const authRequired = authHost || hasPasswordField || hasSignInText;
+      return { authRequired, authUrl: href };
+    }
+  });
+
+  return result;
 }
 
 function buildTargetCandidates(command) {

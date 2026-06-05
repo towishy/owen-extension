@@ -6,6 +6,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-06-05
+
+- Added `journeyCapture` and `paginateCapture` browser actions for URL traversal and multi-page evidence collection under Copilot control.
+- Added structured extraction support via `extractSelectors` for per-page key-field capture during traversal.
+- Added authentication pause and resume flow with `resumeAfterAuth` for browser sign-in gated pages.
+
 ## [0.1.6] - 2026-06-05
 
 - Expanded `#browserAct` into advanced browser automation with workflow execution (`runWorkflow`), resilient targeting (`retries`, `fallbackSelectors`, `fallbackTexts`), and optional presets.

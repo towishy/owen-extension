@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -156,7 +156,7 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "runWorkflow"],
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "journeyCapture", "paginateCapture", "resumeAfterAuth", "runWorkflow"],
               "description": "Browser action to run. Defaults to readPage."
             },
             "selector": {
@@ -175,6 +175,11 @@
               "type": "string",
               "description": "Allowed URL for navigate actions."
             },
+            "urls": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "URL list for journeyCapture. Copilot can navigate each URL and collect per-page summaries."
+            },
             "key": {
               "type": "string",
               "description": "Keyboard key for keyPress actions, such as Enter, Escape, Tab, ArrowDown."
@@ -190,6 +195,27 @@
             "index": {
               "type": "number",
               "description": "Zero-based index when multiple elements match."
+            },
+            "maxPages": {
+              "type": "number",
+              "description": "Maximum page count for journeyCapture or paginateCapture. Clamped to 1-30."
+            },
+            "nextSelector": {
+              "type": "string",
+              "description": "Next page selector for paginateCapture."
+            },
+            "nextText": {
+              "type": "string",
+              "description": "Next page button/link visible text for paginateCapture."
+            },
+            "extractSelectors": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "Named selector map for structured extraction. Example: { incidentId: '#id', severity: '[data-test=severity]' }."
+            },
+            "waitAfterNavigateMs": {
+              "type": "number",
+              "description": "Settle wait after page transition for paginateCapture. Clamped to 200-10000ms."
             },
             "direction": {
               "type": "string",

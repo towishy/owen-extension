@@ -11,6 +11,14 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
+## New in 0.1.7
+
+- URL traversal capture with `journeyCapture` (visit URL lists and collect page-by-page evidence).
+- Pagination capture with `paginateCapture` (follow next page controls and collect multi-page summaries).
+- Structured field extraction with `extractSelectors` for incident-centric key data capture.
+- Authentication-aware pause/resume using `resumeAfterAuth`.
+- Copilot prompt flow for auth-gated pages: finish sign-in in browser, then continue from chat.
+
 ## What It Captures
 
 - Current tab URL and title
@@ -48,7 +56,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.6.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.7.vsix --force
 ```
 
 macOS terminal:
@@ -58,7 +66,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.6.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.7.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -175,11 +183,35 @@ For paired browser control on allowed hosts:
 
 Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, and `runWorkflow`.
+Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` supports `preset`, `steps`, `retries`, `fallbackSelectors`, and `fallbackTexts` so Copilot can run resilient multi-step browser workflows on allowed hosts.
+`#browserAct` supports `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `urls`, `maxPages`, `nextSelector`, `nextText`, and `extractSelectors` so Copilot can run resilient multi-step browser workflows and page-to-page data collection on allowed hosts.
+
+Example: link-driven journey capture + auto analysis
+
+```text
+#browserAct {
+	"action": "journeyCapture",
+	"urls": [
+		"https://security.microsoft.com/incidents",
+		"https://security.microsoft.com/incidents/12345"
+	],
+	"maxPages": 2,
+	"extractSelectors": {
+		"incidentId": "[data-testid='incident-id']",
+		"severity": "[data-testid='severity']"
+	},
+	"investigationName": "incident-12345"
+} 이 링크들을 순서대로 열고 페이지별 핵심 필드와 캡처를 수집한 뒤, 누락 데이터 갭까지 분석해줘.
+```
 
 `closeTab` is safety-gated and requires `confirmDangerous: true`.
+
+If navigation hits an authentication page, browser control pauses safely and asks you to finish sign-in in the same browser tab. After sign-in, type `완료` in Copilot Chat and continue with:
+
+```text
+#browserAct { "action": "resumeAfterAuth" }
+```
 
 Copilot can also read the generated Markdown/JSON/PNG files directly from the workspace.
 
