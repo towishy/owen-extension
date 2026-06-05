@@ -4,6 +4,14 @@ All notable changes to the "owen-browser-bridge" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.2] - 2026-06-05
+
+- Added `Owen Browser Bridge: Open Setup Page` with buttons to start or stop the local server.
+- Added setup page buttons to copy or regenerate the pairing token without displaying it on screen.
+- Added setup page controls to add, edit, or remove allowed browser hosts.
+- Added setup page controls to update or reset the capture directory.
+- Updated pairing setup documentation to use the setup page workflow.
+
 ## [0.1.1] - 2026-06-05
 
 - Added release scripts that package and verify both the VSIX and browser extension ZIP.

@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -17,6 +17,7 @@
   ],
   "activationEvents": [
     "onStartupFinished",
+    "onCommand:owen-browser-bridge.openSetupPage",
     "onCommand:owen-browser-bridge.startServer",
     "onCommand:owen-browser-bridge.stopServer",
     "onCommand:owen-browser-bridge.showLatestCapture",
@@ -29,6 +30,10 @@
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "owen-browser-bridge.openSetupPage",
+        "title": "Owen Browser Bridge: Open Setup Page"
+      },
       {
         "command": "owen-browser-bridge.startServer",
         "title": "Owen Browser Bridge: Start Local Server"

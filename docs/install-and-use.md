@@ -85,8 +85,9 @@ npm run compile
 
 1. Open `C:\OWEN\github\owen-extension` in VS Code.
 2. Press `F5`.
-3. In the Extension Development Host, run `Owen Browser Bridge: Start Local Server` from the Command Palette.
-4. Run `Owen Browser Bridge: Copy Pairing Token`.
+3. In the Extension Development Host, run `Owen Browser Bridge: Open Setup Page` from the Command Palette.
+4. Click **Start Server**.
+5. Click **Copy Pairing Token**.
 
 The local server listens on `http://127.0.0.1:17321` by default.
 
@@ -109,24 +110,26 @@ The local server listens on `http://127.0.0.1:17321` by default.
 ## 4. Pair the Browser Extension
 
 1. In VS Code, press `Ctrl+Shift+P` on Windows/Linux or `Cmd+Shift+P` on macOS.
-2. Run `Owen Browser Bridge: Copy Pairing Token`.
-3. VS Code copies the token to your clipboard.
-4. In Chrome or Edge, click the Owen Capture browser extension icon.
-5. Keep `VS Code Port` as `17321`, unless you changed `owenBrowserBridge.port`.
-6. Paste the copied token into **Pairing Token**.
-7. Select whether to include **screenshot** and **HTML snapshot**.
-8. Click **Save Settings**.
+2. Run `Owen Browser Bridge: Open Setup Page`.
+3. Click **Start Server** if the setup page shows the server is stopped.
+4. Click **Copy Pairing Token**.
+5. VS Code copies the token to your clipboard without showing it on screen.
+6. In Chrome or Edge, click the Owen Capture browser extension icon.
+7. Keep `VS Code Port` as `17321`, unless you changed `owenBrowserBridge.port`.
+8. Paste the copied token into **Pairing Token**.
+9. Select whether to include **screenshot** and **HTML snapshot**.
+10. Click **Save Settings**.
 
-If you need to rotate the token, run `Owen Browser Bridge: Regenerate Pairing Token` in VS Code, then paste the new token into the browser extension and click **Save Settings** again.
+If you need to rotate the token, click **Regenerate and Copy Token** on the setup page, then paste the new token into the browser extension and click **Save Settings** again.
 
 ## 5. Capture a Portal Page
 
-1. Open an allowed page, for example `https://security.microsoft.com`.
+1. Open a page listed in **Allowed Hosts** on the setup page, for example `https://security.microsoft.com`.
 2. Click the Owen Capture browser extension icon.
 3. Click **Send Current Tab**.
 4. In VS Code, run `Owen Browser Bridge: Show Latest Capture`.
 
-The capture is stored under:
+The capture is stored under the folder shown in **Capture Directory** on the setup page. By default, this is:
 
 ```text
 raw/browser-captures/YYYYMM/
@@ -161,7 +164,9 @@ By default, the VS Code extension accepts captures only from:
 - `portal.azure.com`
 - `*.microsoft.com`
 
-Update `owenBrowserBridge.allowedHosts` in VS Code settings to add more domains. Set it to an empty array only for a controlled local test.
+Use **Allowed Hosts** on `Owen Browser Bridge: Open Setup Page` to add, edit, or remove accepted domains. Exact hosts, full URLs, and wildcards such as `*.microsoft.com` are supported.
+
+You can also update `owenBrowserBridge.allowedHosts` directly in VS Code settings. Set it to an empty array only for a controlled local test.
 
 Example:
 
@@ -176,6 +181,15 @@ Example:
 ]
 ```
 
+## 8. Change Capture Directory
+
+Use **Capture Directory** on `Owen Browser Bridge: Open Setup Page` to choose where JSON, Markdown, and PNG capture files are stored.
+
+- Enter a workspace-relative path such as `raw/browser-captures`.
+- Enter an absolute path such as `C:\OWEN\Drive\wiki_raw_articles\browser-captures`.
+- Click **Save Directory** to update `owenBrowserBridge.captureDirectory`.
+- Click **Reset to Default** to delete the custom setting and return to `raw/browser-captures`.
+
 ## Troubleshooting
 
 ### `Owen Browser Bridge` commands do not appear
@@ -186,20 +200,21 @@ Example:
 
 ### Browser popup shows `host_not_allowed`
 
-Add that page's hostname to `owenBrowserBridge.allowedHosts`. For Microsoft subdomains, `*.microsoft.com` covers hosts such as `security.microsoft.com` and `learn.microsoft.com`.
+Open `Owen Browser Bridge: Open Setup Page` and add that page's hostname under **Allowed Hosts**. For Microsoft subdomains, `*.microsoft.com` covers hosts such as `security.microsoft.com` and `learn.microsoft.com`.
 
 ### Browser popup shows `unauthorized`
 
-1. Run `Owen Browser Bridge: Copy Pairing Token` in VS Code.
-2. Paste the token into the browser popup.
-3. Click **Save Settings**.
-4. Try **Send Current Tab** again.
+1. Run `Owen Browser Bridge: Open Setup Page` in VS Code.
+2. Click **Copy Pairing Token**.
+3. Paste the token into the browser popup.
+4. Click **Save Settings**.
+5. Try **Send Current Tab** again.
 
 ### Browser popup shows `Cannot access a chrome:// URL`
 
 Chrome and Edge block extensions from reading internal pages such as `chrome://extensions` or `edge://extensions`. Open a normal HTTPS page and try again.
 
-## 8. Prepare for GitHub Sync
+## 9. Prepare for GitHub Sync
 
 This local project is intended to sync to:
 
@@ -209,7 +224,7 @@ https://github.com/towishy/owen-extension
 
 Do not commit `raw/browser-captures/`, screenshots, or customer/security investigation data.
 
-## 9. Release Checklist
+## 10. Release Checklist
 
 Before creating a GitHub Release, run:
 

@@ -91,19 +91,19 @@ After both extensions are installed, follow [Pairing Setup](#pairing-setup).
 
 Use this once after installing the VS Code extension and the browser extension.
 
-### 1. Start the VS Code bridge
+### 1. Open the setup page
 
 1. In VS Code, press `Ctrl+Shift+P` on Windows/Linux or `Cmd+Shift+P` on macOS.
-2. Run `Owen Browser Bridge: Start Local Server`.
-3. The server listens on `127.0.0.1:17321` by default.
+2. Run `Owen Browser Bridge: Open Setup Page`.
+3. Click **Start Server**.
+4. The server listens on `127.0.0.1:17321` by default.
 
 ### 2. Copy the pairing token
 
-1. In VS Code, press `Ctrl+Shift+P` again on Windows/Linux or `Cmd+Shift+P` on macOS.
-2. Run `Owen Browser Bridge: Copy Pairing Token`.
-3. VS Code copies the token to your clipboard.
+1. On the setup page, click **Copy Pairing Token**.
+2. VS Code copies the token to your clipboard without showing it on screen.
 
-If the token ever needs to be replaced, run `Owen Browser Bridge: Regenerate Pairing Token` and paste the new token into the browser extension again.
+If the token ever needs to be replaced, click **Regenerate and Copy Token** and paste the new token into the browser extension again.
 
 ### 3. Paste the token into the browser extension
 
@@ -116,13 +116,13 @@ If the token ever needs to be replaced, run `Owen Browser Bridge: Regenerate Pai
 
 ### 4. Send a browser page to VS Code
 
-1. Open an allowed page such as `https://security.microsoft.com`, `https://portal.azure.com`, or another configured host.
+1. Open a page listed in **Allowed Hosts** on the setup page, such as `https://security.microsoft.com` or `https://portal.azure.com`.
 2. Click the **Owen Capture** browser extension icon.
 3. Click **Send Current Tab**.
 4. The popup should show `Sent`.
 5. In VS Code, run `Owen Browser Bridge: Show Latest Capture` to open the saved Markdown note.
 
-Captured files are stored in the currently open workspace under `raw/browser-captures/YYYYMM/`.
+Captured files are stored in the folder shown under **Capture Directory** on the setup page. The default is `raw/browser-captures/YYYYMM/` under the current workspace.
 
 ### If the command is not visible
 
@@ -132,7 +132,11 @@ Captured files are stored in the currently open workspace under `raw/browser-cap
 
 ### If the browser says a host is not allowed
 
-Add the host to `owenBrowserBridge.allowedHosts` in VS Code settings. Wildcards such as `*.microsoft.com` are supported.
+Open `Owen Browser Bridge: Open Setup Page`, then use **Allowed Hosts** to add, edit, or remove accepted hosts. Exact hosts, full URLs, and wildcards such as `*.microsoft.com` are supported.
+
+### Change the capture directory
+
+Open `Owen Browser Bridge: Open Setup Page`, then use **Capture Directory** to save a workspace-relative path such as `raw/browser-captures` or an absolute path such as `C:\OWEN\Drive\wiki_raw_articles\browser-captures`. Click **Reset to Default** to remove the custom setting and return to the extension default.
 
 ## Copilot Integration
 
@@ -165,10 +169,10 @@ npm run compile
 In VS Code, press `F5` to launch an Extension Development Host. Then run:
 
 ```text
-Owen Browser Bridge: Copy Pairing Token
+Owen Browser Bridge: Open Setup Page
 ```
 
-Load [browser-extension](browser-extension) as an unpacked extension in Edge or Chrome, paste the token, open an allowed portal page, and click **Send Current Tab**.
+Click **Start Server**, click **Copy Pairing Token**, then load [browser-extension](browser-extension) as an unpacked extension in Edge or Chrome, paste the token, open an allowed portal page, and click **Send Current Tab**.
 
 For the full pairing walkthrough, see [Pairing Setup](#pairing-setup).
 
@@ -192,8 +196,8 @@ When a `v*` tag is pushed to GitHub, `.github/workflows/release.yml` runs the sa
 ## Settings
 
 - `owenBrowserBridge.port`: localhost port, default `17321`
-- `owenBrowserBridge.captureDirectory`: workspace-relative capture folder, default `raw/browser-captures`
-- `owenBrowserBridge.allowedHosts`: accepted page hostnames
+- `owenBrowserBridge.captureDirectory`: workspace-relative or absolute capture folder, default `raw/browser-captures`. You can edit or reset this from the setup page with **Capture Directory**.
+- `owenBrowserBridge.allowedHosts`: accepted page hostnames. You can edit this from the setup page with **Allowed Hosts**.
 - `owenBrowserBridge.autoStart`: start the local server when VS Code starts
 
 ## Security Notes
