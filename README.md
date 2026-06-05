@@ -142,7 +142,7 @@ Captured files are stored in the folder shown under **Capture Directory** on the
 
 ### If the browser says a host is not allowed
 
-Open `Owen Browser Bridge: Open Setup Page`, then use **Allowed Hosts** to add, edit, or remove accepted hosts. Exact hosts, full URLs, and wildcards such as `*.microsoft.com` are supported.
+Open `Owen Browser Bridge: Open Setup Page`, then use **Allowed Hosts** to add, edit, or remove accepted hosts. Exact hosts, full URLs, and wildcards such as `*.microsoft.com` are supported. Click **Allow All Domains** to accept captures and Copilot browser actions from any host, or **Restore Microsoft Defaults** to return to the default Microsoft security/admin portal list.
 
 ### Change the capture directory
 
@@ -153,6 +153,7 @@ Open `Owen Browser Bridge: Open Setup Page`, then use **Capture Directory** to s
 The VS Code extension contributes these Language Model Tools:
 
 - `#getLatestBrowserCapture`: returns the latest received browser capture
+- `#getBrowserState`: returns the latest shared browser session, active tab, capture paths, and structured `screenSummary`
 - `#readBrowserCapture`: returns a capture by id, Markdown path, or JSON path
 - `#readBrowserCaptureGroup`: returns every capture in a host or investigation group for correlation
 - `#browserAct`: sends a safe action to the paired browser and returns the resulting page state
@@ -175,13 +176,19 @@ For multi-tab Defender or portal investigations:
 
 You can also omit the group to analyze the latest capture group, or pass only a host such as `security.microsoft.com` to read that host's newest group.
 
+To inspect the currently shared browser state before choosing the next action:
+
+```text
+#getBrowserState 현재 공유된 브라우저 탭에서 Copilot이 볼 수 있는 headings, interactables, form fields, tables를 요약해줘.
+```
+
 For paired browser control on allowed hosts:
 
 ```text
 #browserAct { "action": "click", "text": "Evidence", "investigationName": "incident-12345" } Defender 인시던트의 Evidence 탭을 열고 결과 화면을 캡처해줘.
 ```
 
-Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
+Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, and text sample. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
 Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
 
@@ -259,7 +266,7 @@ When a `v*` tag is pushed to GitHub, `.github/workflows/release.yml` runs the sa
 - `owenBrowserBridge.port`: localhost port, default `17321`
 - `owenBrowserBridge.captureDirectory`: workspace-relative or absolute capture folder, default `raw/browser-captures`. You can edit or reset this from the setup page with **Capture Directory**.
 - `owenBrowserBridge.captureDirectoryByPlatform`: optional OS-specific capture folder map. Use `win32` for Windows and `darwin` for macOS; these override `captureDirectory` on the matching OS.
-- `owenBrowserBridge.allowedHosts`: accepted page hostnames. You can edit this from the setup page with **Allowed Hosts**.
+- `owenBrowserBridge.allowedHosts`: accepted page hostnames. You can edit this from the setup page with **Allowed Hosts**. Set it to an empty array, or click **Allow All Domains**, to accept any host.
 - `owenBrowserBridge.autoStart`: start the local server when VS Code starts
 
 ## Security Notes

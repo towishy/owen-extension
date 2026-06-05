@@ -25,6 +25,7 @@
     "onCommand:owen-browser-bridge.copyPairingToken",
     "onCommand:owen-browser-bridge.regeneratePairingToken",
     "onLanguageModelTool:get_latest_browser_capture",
+    "onLanguageModelTool:get_browser_state",
     "onLanguageModelTool:read_browser_capture",
     "onLanguageModelTool:read_browser_capture_group",
     "onLanguageModelTool:browser_act"
@@ -76,6 +77,26 @@
           "defender"
         ],
         "icon": "$(browser)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      {
+        "name": "get_browser_state",
+        "displayName": "Get Browser State",
+        "userDescription": "Reads the latest shared browser session state captured by Owen Browser Bridge.",
+        "modelDescription": "Use this tool when the user asks what browser page is currently shared, what Copilot can see on the page, what tab/session is active, or what the next browser action should be. It returns browserSessionId, tab metadata, latest capture paths, and a screenSummary with headings, landmarks, interactables, form fields, tables, viewport, and text sample.",
+        "toolReferenceName": "getBrowserState",
+        "tags": [
+          "browser",
+          "state",
+          "screen",
+          "automation"
+        ],
+        "icon": "$(eye)",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
@@ -140,7 +161,7 @@
         "name": "browser_act",
         "displayName": "Control Paired Browser",
         "userDescription": "Sends a safe action to the paired browser and returns the resulting page state.",
-        "modelDescription": "Use this tool when the user asks Copilot to control the paired browser, run multi-step workflows, navigate allowed hosts, interact with visible UI, wait for loading conditions, inspect interactable elements, and capture resulting page state. Actions are executed by the paired browser extension through the local command queue and are limited to allowed hosts.",
+        "modelDescription": "Use this tool when the user provides a URL to open or capture, asks Copilot to see/read the current browser screen, control the paired browser, click/type/wait/scroll, run multi-step workflows, inspect interactable elements, or capture resulting page state. For action=readPage it returns a structured screenSummary similar to an accessibility snapshot. Actions are executed by the paired browser extension through the local command queue and are limited to allowed hosts unless the user enabled Allow All Domains.",
         "toolReferenceName": "browserAct",
         "tags": [
           "browser",

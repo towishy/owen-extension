@@ -11,18 +11,38 @@ type BrowserCapturePayload = {
 	investigation?: {
 		name?: string;
 	};
+	browserSession?: BrowserSessionState;
 	page?: {
 		url?: string;
 		title?: string;
 		visibleText?: string;
 		selection?: string;
 		html?: string;
+		screenSummary?: Record<string, unknown>;
 		metadata?: Record<string, unknown>;
 	};
 	screenshot?: {
 		dataUrl?: string;
 		mimeType?: string;
 	};
+};
+
+type BrowserSessionState = {
+	browserSessionId?: string;
+	tabId?: number;
+	windowId?: number;
+	tabIndex?: number;
+	url?: string;
+	title?: string;
+	captureGroup?: string;
+	lastAction?: string;
+	lastCommandId?: string;
+	lastScreenshotIncluded?: boolean;
+	lastCaptureId?: string;
+	lastMarkdownPath?: string;
+	lastScreenshotPath?: string;
+	updatedAt?: string;
+	screenSummary?: Record<string, unknown>;
 };
 
 type StoredCapture = {
@@ -269,6 +289,13 @@ let output: vscode.OutputChannel;
 let setupPanel: vscode.WebviewPanel | undefined;
 const browserCommandQueue: BrowserCommand[] = [];
 const browserCommandWaiters = new Map<string, { resolve: (value: BrowserCommandCompletion) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }>();
+const DEFAULT_ALLOWED_HOSTS = [
+	'security.microsoft.com',
+	'security.microsoft365.com',
+	'entra.microsoft.com',
+	'portal.azure.com',
+	'*.microsoft.com'
+];
 
 export async function activate(context: vscode.ExtensionContext) {
 	output = vscode.window.createOutputChannel('Owen Browser Bridge');
@@ -283,6 +310,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('owen-browser-bridge.copyPairingToken', async () => copyPairingToken(context)),
 		vscode.commands.registerCommand('owen-browser-bridge.regeneratePairingToken', async () => regeneratePairingToken(context)),
 		vscode.lm.registerTool('get_latest_browser_capture', createLatestCaptureTool(context)),
+		vscode.lm.registerTool('get_browser_state', createBrowserStateTool(context)),
 		vscode.lm.registerTool('read_browser_capture', createReadCaptureTool(context)),
 		vscode.lm.registerTool('read_browser_capture_group', createReadCaptureGroupTool(context)),
 		vscode.lm.registerTool('browser_act', createBrowserActTool(context))
@@ -451,6 +479,7 @@ async function storeCapture(context: vscode.ExtensionContext, payload: BrowserCa
 		collectedAt
 	};
 	await updateCaptureGroupFiles(folder, stored);
+	await updateLatestBrowserState(context, payload.browserSession, stored);
 	output.appendLine(`Stored capture ${id}: ${markdownPath}`);
 
 	return stored;
@@ -480,6 +509,27 @@ function createLatestCaptureTool(context: vscode.ExtensionContext): vscode.Langu
 		},
 		prepareInvocation() {
 			return { invocationMessage: 'Reading the latest Owen Browser Bridge capture' };
+		}
+	};
+}
+
+function createBrowserStateTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<object> {
+	return {
+		async invoke() {
+			const state = context.globalState.get<BrowserSessionState>('latestBrowserState');
+			if (!state) {
+				return new vscode.LanguageModelToolResult([
+					vscode.LanguageModelDataPart.text('No browser state has been captured yet. Use #browserAct with readPage or capture first.', 'text/plain')
+				]);
+			}
+
+			return new vscode.LanguageModelToolResult([
+				vscode.LanguageModelDataPart.json(state),
+				vscode.LanguageModelDataPart.text(renderBrowserStateMessage(state), 'text/plain')
+			]);
+		},
+		prepareInvocation() {
+			return { invocationMessage: 'Reading the latest Owen Browser Bridge browser state' };
 		}
 	};
 }
@@ -866,6 +916,7 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 		storedCapture = await storeCapture(context, completion.capture);
 		await context.globalState.update('latestCapture', storedCapture);
 	}
+	await updateLatestBrowserState(context, extractBrowserSessionState(completion), storedCapture);
 
 	const result = { ...completion, storedCapture };
 	await appendBrowserActionLog(context, completion.id, completion, storedCapture);
@@ -878,6 +929,40 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 	}
 
 	return result;
+}
+
+function extractBrowserSessionState(completion: BrowserCommandResult): BrowserSessionState | undefined {
+	if (completion.capture?.browserSession) {
+		return completion.capture.browserSession;
+	}
+
+	const result = completion.result;
+	if (!result || typeof result !== 'object') {
+		return undefined;
+	}
+
+	const browserSession = (result as { browserSession?: BrowserSessionState }).browserSession;
+	return browserSession && typeof browserSession === 'object' ? browserSession : undefined;
+}
+
+async function updateLatestBrowserState(context: vscode.ExtensionContext, state: BrowserSessionState | undefined, storedCapture: StoredCapture | undefined) {
+	if (!state && !storedCapture) {
+		return;
+	}
+
+	const latest = context.globalState.get<BrowserSessionState>('latestBrowserState') ?? {};
+	const next: BrowserSessionState = {
+		...latest,
+		...state,
+		lastCaptureId: storedCapture?.id ?? state?.lastCaptureId ?? latest.lastCaptureId,
+		lastMarkdownPath: storedCapture?.markdownPath ?? state?.lastMarkdownPath ?? latest.lastMarkdownPath,
+		lastScreenshotPath: storedCapture?.screenshotPath ?? state?.lastScreenshotPath ?? latest.lastScreenshotPath,
+		captureGroup: storedCapture?.groupName ?? state?.captureGroup ?? latest.captureGroup,
+		url: storedCapture?.url ?? state?.url ?? latest.url,
+		title: storedCapture?.title ?? state?.title ?? latest.title,
+		updatedAt: state?.updatedAt ?? new Date().toISOString()
+	};
+	await context.globalState.update('latestBrowserState', next);
 }
 
 function clampTimeout(timeoutMs: number | undefined) {
@@ -980,9 +1065,34 @@ function renderBrowserActMessage(command: BrowserCommand, completion: BrowserCom
 	if (completion.storedCapture) {
 		lines.push(`Stored capture: ${completion.storedCapture.markdownPath}`);
 	}
+	const browserSession = extractBrowserSessionState(completion);
+	if (browserSession?.browserSessionId) {
+		lines.push(`Browser session: ${browserSession.browserSessionId}`);
+	}
+	if (typeof browserSession?.tabIndex === 'number') {
+		lines.push(`Active tab: ${browserSession.tabIndex} · ${browserSession.title ?? browserSession.url ?? 'Untitled'}`);
+	}
 	if (completion.result) {
 		lines.push(`Result: ${JSON.stringify(completion.result).slice(0, 4000)}`);
 	}
+	return lines.join('\n');
+}
+
+function renderBrowserStateMessage(state: BrowserSessionState) {
+	const summary = state.screenSummary;
+	const counts = summary?.counts as Record<string, unknown> | undefined;
+	const lines = [
+		`Browser state: ${state.browserSessionId ?? 'unknown session'}`,
+		state.title ? `Title: ${state.title}` : undefined,
+		state.url ? `URL: ${state.url}` : undefined,
+		typeof state.tabIndex === 'number' ? `Tab index: ${state.tabIndex}` : undefined,
+		state.lastAction ? `Last action: ${state.lastAction}` : undefined,
+		state.captureGroup ? `Capture group: ${state.captureGroup}` : undefined,
+		state.lastMarkdownPath ? `Latest capture: ${state.lastMarkdownPath}` : undefined,
+		state.lastScreenshotPath ? `Latest screenshot: ${state.lastScreenshotPath}` : undefined,
+		counts ? `Screen counts: ${JSON.stringify(counts)}` : undefined,
+		summary ? 'Use screenSummary.interactables, formFields, headings, landmarks, tables, and viewport to decide the next browser action.' : undefined
+	].filter(Boolean) as string[];
 	return lines.join('\n');
 }
 
@@ -1280,6 +1390,10 @@ async function openSetupPage(context: vscode.ExtensionContext) {
 				await updateAllowedHost(message.index, message.host);
 			} else if (command === 'removeAllowedHost') {
 				await removeAllowedHost(message.index);
+			} else if (command === 'allowAllHosts') {
+				await allowAllHosts();
+			} else if (command === 'restoreDefaultAllowedHosts') {
+				await restoreDefaultAllowedHosts();
 			} else if (command === 'updateCaptureDirectory') {
 				await updateCaptureDirectory(message.captureDirectory);
 			} else if (command === 'updatePlatformCaptureDirectories') {
@@ -1324,6 +1438,7 @@ function renderSetupPage(webview: vscode.Webview, state: { isRunning: boolean; p
 	const statusClass = state.isRunning ? 'running' : 'stopped';
 	const statusText = state.isRunning ? `Running on 127.0.0.1:${state.port}` : 'Stopped';
 	const latestText = state.latest ? `${state.latest.id} · ${state.latest.title ?? state.latest.url ?? 'Untitled capture'}` : 'No capture received yet';
+	const allHostsAllowed = state.allowedHosts.length === 0;
 	const allowedHostRows = state.allowedHosts.length > 0
 		? state.allowedHosts.map((host, index) => `<div class="host-row">
 				<input aria-label="Allowed host ${index + 1}" data-host-index="${index}" value="${escapeHtml(host)}" placeholder="security.microsoft.com or https://portal.azure.com">
@@ -1402,6 +1517,11 @@ function renderSetupPage(webview: vscode.Webview, state: { isRunning: boolean; p
 		<section class="card">
 			<strong>Allowed Hosts</strong>
 			<p>Add exact hosts, URLs, or wildcard suffixes such as <code>security.microsoft.com</code>, <code>https://portal.azure.com</code>, or <code>*.microsoft.com</code>.</p>
+			<p class="meta">${allHostsAllowed ? 'All domains are currently accepted for captures and Copilot browser actions.' : 'Only the hosts listed below are accepted.'}</p>
+			<div class="actions">
+				<button class="secondary danger" data-command="allowAllHosts" ${allHostsAllowed ? 'disabled' : ''}>Allow All Domains</button>
+				<button class="secondary" data-command="restoreDefaultAllowedHosts" ${allHostsAllowed ? '' : 'disabled'}>Restore Microsoft Defaults</button>
+			</div>
 			<div class="host-list">
 				${allowedHostRows}
 			</div>
@@ -1545,6 +1665,16 @@ async function removeAllowedHost(indexInput: unknown) {
 
 async function setAllowedHosts(hosts: string[]) {
 	await getConfig().update('allowedHosts', hosts, vscode.ConfigurationTarget.Global);
+}
+
+async function allowAllHosts() {
+	await setAllowedHosts([]);
+	vscode.window.showWarningMessage('Owen Browser Bridge now accepts captures and browser actions from any host.');
+}
+
+async function restoreDefaultAllowedHosts() {
+	await setAllowedHosts(DEFAULT_ALLOWED_HOSTS);
+	vscode.window.showInformationMessage('Allowed hosts restored to Microsoft portal defaults.');
 }
 
 async function updateCaptureDirectory(input: unknown) {
@@ -1852,6 +1982,14 @@ function renderMarkdown(payload: BrowserCapturePayload, screenshotFile?: string)
 		lines.push('## Selection', '', page.selection, '');
 	}
 
+	if (payload.browserSession) {
+		lines.push('## Browser Session', '', '```json', JSON.stringify(payload.browserSession, null, 2), '```', '');
+	}
+
+	if (page.screenSummary) {
+		lines.push('## Screen Summary', '', '```json', JSON.stringify(page.screenSummary, null, 2), '```', '');
+	}
+
 	if (page.visibleText) {
 		lines.push('## Visible Text', '', page.visibleText.slice(0, 50000), '');
 	}
@@ -1860,7 +1998,7 @@ function renderMarkdown(payload: BrowserCapturePayload, screenshotFile?: string)
 		lines.push('## Metadata', '', '```json', JSON.stringify(page.metadata, null, 2), '```', '');
 	}
 
-	lines.push('## Copilot Prompt', '', 'Analyze this browser capture using the JSON, visible text, metadata, and screenshot stored next to this note. Highlight evidence, risk, likely next actions, and missing context.', '');
+	lines.push('## Copilot Prompt', '', 'Analyze this browser capture using the screen summary, JSON, visible text, metadata, and screenshot stored next to this note. Highlight evidence, risk, likely next actions, and missing context.', '');
 	return lines.join('\n');
 }
 

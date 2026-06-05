@@ -11,6 +11,8 @@ let pollInProgress = false;
 let lastReplayScript;
 const stateCheckpoints = new Map();
 const executionRunHistory = new Map();
+const BROWSER_SESSION_STORAGE_KEY = 'owenBrowserSessionId';
+const LATEST_BROWSER_STATE_STORAGE_KEY = 'owenLatestBrowserState';
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('owen-command-poll', { periodInMinutes: 0.5 });
@@ -84,6 +86,8 @@ async function executeBrowserCommand(command, options) {
     const capture = command.captureAfter || command.action === 'capture'
       ? await createCapturePayload(currentTab, command, options)
       : undefined;
+    const browserSession = capture?.browserSession ?? await buildBrowserSessionState(currentTab, command, undefined, false);
+    await rememberBrowserState(browserSession);
     const response = {
       id: command.id,
       ok: true,
@@ -93,7 +97,8 @@ async function executeBrowserCommand(command, options) {
         steps: executionTrail,
         url: currentTab.url,
         title: currentTab.title,
-        tabIndex: currentTab.index
+        tabIndex: currentTab.index,
+        browserSession
       },
       capture
     };
@@ -299,6 +304,17 @@ async function executeSingleAction(command, allowedHosts) {
 
   if (action === 'capture') {
     return { ok: true };
+  }
+
+  if (action === 'readPage') {
+    const [{ result: pageSnapshot }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: collectPageSnapshot,
+      args: [command.includeHtml]
+    });
+    const browserSession = await buildBrowserSessionState(tab, command, pageSnapshot?.screenSummary, false);
+    await rememberBrowserState(browserSession);
+    return { ok: true, page: pageSnapshot, browserSession };
   }
 
   const targets = buildTargetCandidates(command);
@@ -1137,11 +1153,58 @@ function buildTargetCandidates(command) {
 
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) {
+    return tab;
+  }
+
+  const [lastFocusedTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (lastFocusedTab?.id) {
+    return lastFocusedTab;
+  }
+
+  const activeTabs = await chrome.tabs.query({ active: true });
+  const fallbackTab = activeTabs.find(candidate => candidate.id && candidate.windowId !== chrome.windows.WINDOW_ID_NONE);
+  if (fallbackTab?.id) {
+    return fallbackTab;
+  }
+
   if (!tab?.id) {
     throw new Error('No active browser tab is available.');
   }
 
   return tab;
+}
+
+async function getBrowserSessionId() {
+  const stored = await chrome.storage.local.get(BROWSER_SESSION_STORAGE_KEY);
+  if (stored[BROWSER_SESSION_STORAGE_KEY]) {
+    return stored[BROWSER_SESSION_STORAGE_KEY];
+  }
+
+  const id = `browser-session-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${crypto.randomUUID().slice(0, 8)}`;
+  await chrome.storage.local.set({ [BROWSER_SESSION_STORAGE_KEY]: id });
+  return id;
+}
+
+async function buildBrowserSessionState(tab, command, screenSummary, screenshotIncluded) {
+  return {
+    browserSessionId: await getBrowserSessionId(),
+    tabId: tab.id,
+    windowId: tab.windowId,
+    tabIndex: tab.index,
+    url: tab.url,
+    title: tab.title,
+    captureGroup: command.investigationName,
+    lastAction: command.action ?? 'readPage',
+    lastCommandId: command.id,
+    lastScreenshotIncluded: screenshotIncluded,
+    updatedAt: new Date().toISOString(),
+    screenSummary
+  };
+}
+
+async function rememberBrowserState(browserSession) {
+  await chrome.storage.local.set({ [LATEST_BROWSER_STATE_STORAGE_KEY]: browserSession });
 }
 
 async function getTabByIndex(targetTabIndex) {
@@ -1171,7 +1234,7 @@ async function captureCurrentTab() {
     throw new Error('Pairing token is missing. Paste the token from VS Code first.');
   }
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await getActiveTab();
   if (!tab?.id || !tab.url) {
     throw new Error('No active browser tab is available.');
   }
@@ -1233,11 +1296,15 @@ async function createCapturePayload(tab, command, options) {
     screenshot = { dataUrl, mimeType: 'image/png' };
   }
 
+  const browserSession = await buildBrowserSessionState(tab, command, pageSnapshot.screenSummary, Boolean(screenshot));
+  await rememberBrowserState(browserSession);
+
   return {
     source: 'owen-browser-capture',
     version: chrome.runtime.getManifest().version,
     collectedAt: new Date().toISOString(),
     investigation: command.investigationName ? { name: command.investigationName } : options.investigationName ? { name: options.investigationName } : undefined,
+    browserSession,
     page: {
       url: tab.url,
       title: tab.title ?? pageSnapshot.title,
@@ -1648,6 +1715,49 @@ async function getOptions() {
 
 function collectPageSnapshot(includeHtml) {
   const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const isVisible = element => {
+    if (!element) {
+      return false;
+    }
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+      return false;
+    }
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+  const selectorHint = element => {
+    if (element.id) {
+      return `#${CSS.escape(element.id)}`;
+    }
+    const testId = element.getAttribute('data-testid') || element.getAttribute('data-test-id') || element.getAttribute('data-test');
+    if (testId) {
+      return `[data-testid="${CSS.escape(testId)}"]`;
+    }
+    const label = element.getAttribute('aria-label') || element.getAttribute('title');
+    if (label) {
+      return `${element.tagName.toLowerCase()}[aria-label="${CSS.escape(label)}"]`;
+    }
+    return undefined;
+  };
+  const describeElement = (element, index) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      index,
+      tag: element.tagName.toLowerCase(),
+      role: element.getAttribute('role') || undefined,
+      type: element.getAttribute('type') || undefined,
+      text: normalize(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || '').slice(0, 180),
+      selectorHint: selectorHint(element),
+      disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+      bounds: {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      }
+    };
+  };
   const metadata = {};
   for (const meta of document.querySelectorAll('meta[name], meta[property]')) {
     const key = meta.getAttribute('name') || meta.getAttribute('property');
@@ -1667,11 +1777,73 @@ function collectPageSnapshot(includeHtml) {
     .map(element => normalize(element.innerText || element.getAttribute('aria-label') || element.getAttribute('title') || ''))
     .filter(Boolean);
 
+  const interactables = Array.from(document.querySelectorAll('button,[role="button"],[role="tab"],a[href],input,textarea,select,[tabindex]'))
+    .filter(isVisible)
+    .slice(0, 120)
+    .map(describeElement);
+  const formFields = Array.from(document.querySelectorAll('input,textarea,select'))
+    .filter(isVisible)
+    .slice(0, 80)
+    .map((element, index) => ({
+      index,
+      tag: element.tagName.toLowerCase(),
+      type: element.getAttribute('type') || undefined,
+      name: element.getAttribute('name') || undefined,
+      label: normalize(element.getAttribute('aria-label') || element.getAttribute('placeholder') || element.labels?.[0]?.innerText || ''),
+      selectorHint: selectorHint(element),
+      disabled: Boolean(element.disabled)
+    }));
+  const tables = Array.from(document.querySelectorAll('table'))
+    .filter(isVisible)
+    .slice(0, 20)
+    .map((table, index) => ({
+      index,
+      caption: normalize(table.caption?.innerText || ''),
+      columns: Array.from(table.querySelectorAll('th')).slice(0, 20).map(cell => normalize(cell.innerText)).filter(Boolean),
+      rowCount: table.querySelectorAll('tr').length
+    }));
+  const landmarks = Array.from(document.querySelectorAll('main,nav,aside,header,footer,[role="main"],[role="navigation"],[role="search"],[role="dialog"]'))
+    .filter(isVisible)
+    .slice(0, 40)
+    .map((element, index) => ({
+      index,
+      tag: element.tagName.toLowerCase(),
+      role: element.getAttribute('role') || undefined,
+      label: normalize(element.getAttribute('aria-label') || element.getAttribute('title') || ''),
+      selectorHint: selectorHint(element)
+    }));
+  const screenSummary = {
+    url: location.href,
+    title: document.title,
+    textSample: normalize(document.body?.innerText ?? '').slice(0, 4000),
+    counts: {
+      headings: headings.length,
+      interactables: interactables.length,
+      formFields: formFields.length,
+      tables: tables.length,
+      landmarks: landmarks.length
+    },
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+      scrollX: Math.round(window.scrollX),
+      scrollY: Math.round(window.scrollY),
+      documentHeight: Math.round(document.documentElement.scrollHeight)
+    },
+    headings,
+    landmarks,
+    interactables,
+    formFields,
+    tables
+  };
+
   return {
     url: location.href,
     title: document.title,
     visibleText: normalize(document.body?.innerText ?? '').slice(0, 200000),
     selection: normalize(String(window.getSelection?.() ?? '')),
+    screenSummary,
     html: includeHtml ? document.documentElement.outerHTML.slice(0, 250000) : undefined,
     metadata: {
       lang: document.documentElement.lang || undefined,

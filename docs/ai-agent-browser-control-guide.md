@@ -38,11 +38,14 @@ In GitHub Copilot Chat, use the contributed tool reference names:
 | Tool | Use when |
 |---|---|
 | `#browserAct` | Control the paired browser or run workflows |
+| `#getBrowserState` | Read the latest shared browser session, active tab, capture paths, and structured screen summary |
 | `#getLatestBrowserCapture` | Read the latest capture |
 | `#readBrowserCapture` | Read one capture by id/path |
 | `#readBrowserCaptureGroup` | Read all captures in a host or investigation group |
 
-Some agent hosts may expose the underlying tool id as `browser_act`. If `#browserAct` is unavailable, try `#browser_act` or inspect the available tool list.
+Some agent hosts may expose the underlying tool ids such as `browser_act` or `get_browser_state`. If `#browserAct` or `#getBrowserState` is unavailable, try the snake_case id or inspect the available tool list.
+
+`#browserAct { "action": "readPage" }` and `#getBrowserState` return `screenSummary`, a compact structured page state for agent planning. Prefer it over raw visible text when choosing selectors or deciding the next action. It includes headings, landmarks, interactables, form fields, tables, viewport, and a text sample.
 
 ## Direct HTTP Mode
 
@@ -93,47 +96,51 @@ For high-risk navigation or multi-page actions, include:
 
 ## Action Catalog
 
-| Action | Purpose | Key inputs |
-|---|---|---|
-| `readPage` | Return current page state | `captureAfter` |
-| `capture` | Store current tab capture | `includeScreenshot`, `includeHtml` |
-| `navigate` | Navigate active tab | `url`, `acknowledgement` |
-| `click` | Click by selector/text/label | `selector`, `text`, `label` |
-| `type` | Type non-secret text | `selector`, `text`, `label`, `value` |
-| `waitForText` | Wait for visible text | `text`, `timeoutMs` |
-| `wait` | Wait for condition | `wait.kind`, `selector`, `text`, `urlPattern` |
-| `scroll` | Scroll page | `direction`, `delta` |
-| `hover` | Hover target | `selector`, `text`, `label` |
-| `keyPress` | Send key events | `key` |
-| `selectOption` | Select option | `selector`, `value`, `options` |
-| `clearInput` | Clear input/textarea | `selector`, `text`, `label` |
-| `back`, `forward`, `reload` | Browser history controls | `timeoutMs` |
-| `openInNewTab` | Open URL in new tab | `url`, `acknowledgement` |
-| `switchTab` | Activate tab by index | `targetTabIndex` |
-| `closeTab` | Close tab | `confirmDangerous: true` |
-| `listInteractables` | Inspect clickable/focusable UI | none |
-| `runWorkflow` | Execute multiple steps | `steps`, `preset` |
-| `journeyCapture` | Visit URL list and collect summaries | `urls`, `maxPages`, `extractSelectors` |
-| `paginateCapture` | Follow next-page controls | `nextSelector`, `nextText`, `maxPages` |
-| `smartFormFill` | Fill form fields by label/name/placeholder | `formFields`, `submitSelector`, `submitText` |
-| `conditionalWorkflow` | Branch based on page state | `conditions` |
-| `multiTabCrawl` | Open matched links in background tabs | `linkSelector`, `linkText`, `maxTabs` |
-| `runtimeSnapshot` | Return performance/resource hints | none |
-| `domDiffTimeline` | Run steps and compare DOM fingerprints | `steps` |
-| `ocrSnapshot` | Return screenshot and DOM text hints | none |
-| `dataGapGuard` | Check required fields/texts | `requiredFields`, `requiredTexts`, `extractSelectors` |
-| `exportReplay` | Return last replay script | none |
-| `networkTraceCapture` | Return resource timing trace | `urlIncludes`, `maxEntries` |
-| `safeDownloadAndHash` | Fetch file URL and SHA-256 hash it | `selector`, `text`, `url` |
-| `tableExtract` | Extract table rows as JSON/CSV | `tableSelector`, `headerMode`, `outputFormat` |
-| `stateCheckpoint` | Save URL, scroll, and optional form state | `checkpointName`, `includeFormState` |
-| `rollbackToCheckpoint` | Restore a saved checkpoint | `checkpointName`, `strictUrlMatch` |
-| `humanReviewGate` | Pause until explicit keyword approval | `reviewPrompt`, `approvalKeyword`, `value` |
-| `bulkActionFromList` | Apply click/hover to matched list items | `itemSelector`, `matchText`, `matchMode`, `actionTemplate` |
-| `semanticWait` | Wait for semantic page conditions | `semanticConditions` |
-| `compareCaptureRuns` | Compare two recent action runs | `baseRunId`, `newRunId`, `ignoreSelectors` |
-| `policyGuard` | Check host/action policy before proceeding | `policyProfile`, `onViolation`, `actionTemplate` |
-| `resumeAfterAuth` | Continue after manual sign-in | none |
+Smoke-test status is based on the local control page run on 2026-06-06 with Edge demo profile `Profile 1`. Calls below omit common fields such as `captureAfter`, `includeScreenshot`, `investigationName`, and `timeoutMs` unless they are relevant.
+
+| Action | Purpose | Key inputs | Smoke-test status | Smoke-test call |
+| --- | --- | --- | --- | --- |
+| `readPage` | Return current page state | `captureAfter` | Success | `#browserAct { "action": "readPage", "captureAfter": false }` |
+| `capture` | Store current tab capture | `includeScreenshot`, `includeHtml` | Success | `#browserAct { "action": "capture", "captureAfter": true, "includeScreenshot": true }` |
+| `navigate` | Navigate active tab | `url`, `acknowledgement` | Success | `#browserAct { "action": "navigate", "url": "http://127.0.0.1:18080/page1", "acknowledgement": "CONFIRM_BROWSER_ACTION" }` |
+| `click` | Click by selector/text/label | `selector`, `text`, `label` | Success | `#browserAct { "action": "click", "selector": "#click-target" }` |
+| `type` | Type non-secret text | `selector`, `text`, `label`, `value` | Success | `#browserAct { "action": "type", "selector": "#name-input", "value": "Owen Tester" }` |
+| `waitForText` | Wait for visible text | `text`, `timeoutMs` | Success | `#browserAct { "action": "waitForText", "text": "READY_MARKER" }` |
+| `wait` | Wait for condition | `wait.kind`, `selector`, `text`, `urlPattern` | Success | `#browserAct { "action": "wait", "wait": { "kind": "text", "text": "READY_MARKER" } }` |
+| `scroll` | Scroll page | `direction`, `delta` | Success | `#browserAct { "action": "scroll", "direction": "down", "delta": 500 }` |
+| `hover` | Hover target | `selector`, `text`, `label` | Success | `#browserAct { "action": "hover", "selector": "#hover-target" }` |
+| `keyPress` | Send key events | `key` | Success | `#browserAct { "action": "keyPress", "selector": "#key-input", "key": "Enter" }` |
+| `selectOption` | Select option | `selector`, `value`, `options` | Success | `#browserAct { "action": "selectOption", "selector": "#choice", "value": "b" }` |
+| `clearInput` | Clear input/textarea | `selector`, `text`, `label` | Success | `#browserAct { "action": "clearInput", "selector": "#notes" }` |
+| `back` | Go back in browser history | `timeoutMs` | Success | `#browserAct { "action": "back" }` |
+| `forward` | Go forward in browser history | `timeoutMs` | Success | `#browserAct { "action": "forward" }` |
+| `reload` | Reload current tab | `timeoutMs` | Success | `#browserAct { "action": "reload" }` |
+| `openInNewTab` | Open URL in new tab | `url`, `acknowledgement` | Success | `#browserAct { "action": "openInNewTab", "url": "http://127.0.0.1:18080/page1", "acknowledgement": "CONFIRM_BROWSER_ACTION" }` |
+| `switchTab` | Activate tab by index | `targetTabIndex` | Success | `#browserAct { "action": "switchTab", "targetTabIndex": 0 }` |
+| `closeTab` | Close tab | `confirmDangerous: true` | Success | `#browserAct { "action": "closeTab", "confirmDangerous": true }` |
+| `listInteractables` | Inspect clickable/focusable UI | none | Success | `#browserAct { "action": "listInteractables", "captureAfter": false }` |
+| `runWorkflow` | Execute multiple steps | `steps`, `preset` | Fails: unserializable script argument | `#browserAct { "action": "runWorkflow", "steps": [{ "action": "readPage" }, { "action": "click", "selector": "#click-target" }] }` |
+| `journeyCapture` | Visit URL list and collect summaries | `urls`, `maxPages`, `extractSelectors` | Success | `#browserAct { "action": "journeyCapture", "urls": ["http://127.0.0.1:18080/page1", "http://127.0.0.1:18080/page2"], "maxPages": 2, "extractSelectors": { "ready": "#ready-text" }, "acknowledgement": "CONFIRM_BROWSER_ACTION" }` |
+| `paginateCapture` | Follow next-page controls | `nextSelector`, `nextText`, `maxPages` | Success | `#browserAct { "action": "paginateCapture", "nextSelector": "#next-page", "maxPages": 2, "extractSelectors": { "ready": "#ready-text" } }` |
+| `smartFormFill` | Fill form fields by label/name/placeholder | `formFields`, `submitSelector`, `submitText` | Success | `#browserAct { "action": "smartFormFill", "formFields": { "Name": "Smart Fill", "Notes": "Smart notes" }, "submitSelector": "#submit-form" }` |
+| `conditionalWorkflow` | Branch based on page state | `conditions` | Success | `#browserAct { "action": "conditionalWorkflow", "conditions": [{ "if": { "text": "READY_MARKER" }, "then": [{ "action": "click", "selector": "#click-target" }] }] }` |
+| `multiTabCrawl` | Open matched links in background tabs | `linkSelector`, `linkText`, `maxTabs` | Fails: unserializable script argument | `#browserAct { "action": "multiTabCrawl", "linkSelector": ".crawl-link", "maxTabs": 2 }` |
+| `runtimeSnapshot` | Return performance/resource hints | none | Success | `#browserAct { "action": "runtimeSnapshot" }` |
+| `domDiffTimeline` | Run steps and compare DOM fingerprints | `steps` | Success | `#browserAct { "action": "domDiffTimeline", "steps": [{ "action": "click", "selector": "#click-target" }, { "action": "type", "selector": "#name-input", "value": "Diff Test" }] }` |
+| `ocrSnapshot` | Return screenshot and DOM text hints | none | Success | `#browserAct { "action": "ocrSnapshot" }` |
+| `dataGapGuard` | Check required fields/texts | `requiredFields`, `requiredTexts`, `extractSelectors` | Success | `#browserAct { "action": "dataGapGuard", "requiredFields": ["ready"], "requiredTexts": ["READY_MARKER"], "extractSelectors": { "ready": "#ready-text" } }` |
+| `exportReplay` | Return last replay script | none | Success | `#browserAct { "action": "exportReplay" }` |
+| `networkTraceCapture` | Return resource timing trace | `urlIncludes`, `maxEntries` | Success | `#browserAct { "action": "networkTraceCapture", "urlIncludes": ["api"], "maxEntries": 20 }` |
+| `safeDownloadAndHash` | Fetch file URL and SHA-256 hash it | `selector`, `text`, `url` | Success with explicit empty optional fields; omission currently fails | `#browserAct { "action": "safeDownloadAndHash", "selector": "", "text": "", "url": "http://127.0.0.1:18080/download.txt" }` |
+| `tableExtract` | Extract table rows as JSON/CSV | `tableSelector`, `headerMode`, `outputFormat` | Success | `#browserAct { "action": "tableExtract", "tableSelector": "#data-table", "headerMode": "auto", "outputFormat": "json" }` |
+| `stateCheckpoint` | Save URL, scroll, and optional form state | `checkpointName`, `includeFormState` | Success | `#browserAct { "action": "stateCheckpoint", "checkpointName": "before-change", "includeFormState": true }` |
+| `rollbackToCheckpoint` | Restore a saved checkpoint | `checkpointName`, `strictUrlMatch` | Success | `#browserAct { "action": "rollbackToCheckpoint", "checkpointName": "before-change", "strictUrlMatch": false }` |
+| `humanReviewGate` | Pause until explicit keyword approval | `reviewPrompt`, `approvalKeyword`, `value` | Success for approved path | `#browserAct { "action": "humanReviewGate", "reviewPrompt": "Approve smoke test gate", "approvalKeyword": "APPROVE_SMOKE", "value": "APPROVE_SMOKE" }` |
+| `bulkActionFromList` | Apply click/hover to matched list items | `itemSelector`, `matchText`, `matchMode`, `actionTemplate` | Success | `#browserAct { "action": "bulkActionFromList", "itemSelector": ".bulk-item", "matchText": "High", "matchMode": "includes", "actionTemplate": { "action": "hover" }, "maxItems": 2 }` |
+| `semanticWait` | Wait for semantic page conditions | `semanticConditions` | Success | `#browserAct { "action": "semanticWait", "semanticConditions": ["text:READY_MARKER", "selector:#data-table"] }` |
+| `compareCaptureRuns` | Compare two recent action runs | `baseRunId`, `newRunId`, `ignoreSelectors` | Success | `#browserAct { "action": "compareCaptureRuns" }` |
+| `policyGuard` | Check host/action policy before proceeding | `policyProfile`, `onViolation`, `actionTemplate` | Success | `#browserAct { "action": "policyGuard", "policyProfile": "standard", "onViolation": "block", "actionTemplate": { "action": "click" } }` |
+| `resumeAfterAuth` | Continue after manual sign-in | none | Conditional: only valid after `AUTH_REQUIRED`; no pending auth in smoke test | `#browserAct { "action": "resumeAfterAuth" }` |
 
 ## Wait Conditions
 

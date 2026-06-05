@@ -166,13 +166,19 @@ For all captures in a related host or investigation group:
 
 If you omit the group, `#readBrowserCaptureGroup` reads the latest capture group. If you pass only a host such as `security.microsoft.com`, it reads that host's newest group.
 
+To inspect the currently shared browser state before choosing the next action:
+
+```text
+#getBrowserState 현재 공유된 브라우저 탭에서 Copilot이 볼 수 있는 headings, interactables, form fields, tables를 요약해줘.
+```
+
 For paired browser control:
 
 ```text
 #browserAct { "action": "click", "text": "Evidence", "investigationName": "incident-12345" } Evidence 탭을 열고 결과 화면을 캡처해줘.
 ```
 
-`#browserAct` supports `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. Actions are delivered through the paired browser extension, limited to **Allowed Hosts**, and capture the resulting page by default.
+`#browserAct` supports `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, and text sample. Actions are delivered through the paired browser extension, limited to **Allowed Hosts**, and capture the resulting page by default.
 
 Advanced actions are available for richer automation: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
 
@@ -215,7 +221,7 @@ By default, the VS Code extension accepts captures only from:
 - `portal.azure.com`
 - `*.microsoft.com`
 
-Use **Allowed Hosts** on `Owen Browser Bridge: Open Setup Page` to add, edit, or remove accepted domains. Exact hosts, full URLs, and wildcards such as `*.microsoft.com` are supported.
+Use **Allowed Hosts** on `Owen Browser Bridge: Open Setup Page` to add, edit, or remove accepted domains. Exact hosts, full URLs, and wildcards such as `*.microsoft.com` are supported. Click **Allow All Domains** to accept captures and Copilot browser actions from any host, or **Restore Microsoft Defaults** to return to the default Microsoft security/admin portal list.
 
 You can also update `owenBrowserBridge.allowedHosts` directly in VS Code settings. Set it to an empty array only for a controlled local test.
 
