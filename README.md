@@ -220,6 +220,7 @@ Copilot can also read the generated Markdown/JSON/PNG files directly from the wo
 ## Quick Start
 
 Full setup instructions are in [docs/install-and-use.md](docs/install-and-use.md).
+AI-agent usage guidance is in [docs/ai-agent-browser-control-guide.md](docs/ai-agent-browser-control-guide.md).
 
 ```powershell
 npm install

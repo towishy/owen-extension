@@ -203,6 +203,8 @@ If the browser is redirected to an authentication page during automation, the ac
 
 If tool reference is unavailable in your Copilot Chat build, open the generated Markdown file and ask Copilot to analyze the current file plus adjacent JSON/PNG capture assets.
 
+For a tool-oriented guide that another AI agent can follow directly, see [AI Agent Browser Control Guide](ai-agent-browser-control-guide.md).
+
 ## 7. Change Allowed Hosts
 
 By default, the VS Code extension accepts captures only from:
