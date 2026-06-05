@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -140,7 +140,7 @@
         "name": "browser_act",
         "displayName": "Control Paired Browser",
         "userDescription": "Sends a safe action to the paired browser and returns the resulting page state.",
-        "modelDescription": "Use this tool when the user asks Copilot to control the paired browser, navigate an allowed host, click visible UI, type non-secret text, wait for text, read the page, or capture the current state. Actions are executed by the paired browser extension through the local command queue and are limited to allowed hosts.",
+        "modelDescription": "Use this tool when the user asks Copilot to control the paired browser, run multi-step workflows, navigate allowed hosts, interact with visible UI, wait for loading conditions, inspect interactable elements, and capture resulting page state. Actions are executed by the paired browser extension through the local command queue and are limited to allowed hosts.",
         "toolReferenceName": "browserAct",
         "tags": [
           "browser",
@@ -156,7 +156,7 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText"],
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "runWorkflow"],
               "description": "Browser action to run. Defaults to readPage."
             },
             "selector": {
@@ -169,15 +169,67 @@
             },
             "value": {
               "type": "string",
-              "description": "Non-secret text to type. Password fields are refused."
+              "description": "Non-secret text to type, option value to select, or key alias fallback. Password fields are refused."
             },
             "url": {
               "type": "string",
               "description": "Allowed URL for navigate actions."
             },
+            "key": {
+              "type": "string",
+              "description": "Keyboard key for keyPress actions, such as Enter, Escape, Tab, ArrowDown."
+            },
+            "role": {
+              "type": "string",
+              "description": "ARIA role hint used to target elements, such as tab, button, menuitem."
+            },
+            "label": {
+              "type": "string",
+              "description": "ARIA label or title hint used to target elements."
+            },
+            "index": {
+              "type": "number",
+              "description": "Zero-based index when multiple elements match."
+            },
+            "direction": {
+              "type": "string",
+              "enum": ["up", "down"],
+              "description": "Scroll direction for scroll actions."
+            },
+            "delta": {
+              "type": "number",
+              "description": "Scroll distance in pixels for scroll actions."
+            },
+            "options": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Option values or labels for selectOption actions."
+            },
             "timeoutMs": {
               "type": "number",
               "description": "Timeout in milliseconds, clamped between 1000 and 120000."
+            },
+            "retries": {
+              "type": "number",
+              "description": "Retry count for flaky UI operations. Clamped between 0 and 3."
+            },
+            "fallbackSelectors": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Alternative selectors used when the primary target fails."
+            },
+            "fallbackTexts": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Alternative visible text labels used when the primary target fails."
+            },
+            "targetTabIndex": {
+              "type": "number",
+              "description": "Zero-based browser tab index for switchTab or closeTab actions."
+            },
+            "confirmDangerous": {
+              "type": "boolean",
+              "description": "Required for destructive actions such as closeTab."
             },
             "captureAfter": {
               "type": "boolean",
@@ -194,6 +246,32 @@
             "investigationName": {
               "type": "string",
               "description": "Optional group name for resulting captures."
+            },
+            "preset": {
+              "type": "string",
+              "enum": ["defenderIncidentSurvey", "defenderIncidentAlerts", "defenderIncidentEvidence"],
+              "description": "Named workflow preset for Defender incident navigation."
+            },
+            "steps": {
+              "type": "array",
+              "description": "Workflow steps used when action is runWorkflow. Each step can include action, selector/text targeting, waits, retries, and fallback targets.",
+              "items": {
+                "type": "object"
+              }
+            },
+            "wait": {
+              "type": "object",
+              "description": "Wait condition object for action=wait. Example: { kind: 'element', selector: '[role=tab]' }",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["text", "element", "elementGone", "urlMatch", "spinnerGone"]
+                },
+                "text": { "type": "string" },
+                "selector": { "type": "string" },
+                "urlPattern": { "type": "string" },
+                "pollIntervalMs": { "type": "number" }
+              }
             }
           },
           "required": []

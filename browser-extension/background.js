@@ -69,37 +69,164 @@ async function pollForCommand() {
 
 async function executeBrowserCommand(command, options) {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) {
-      throw new Error('No active browser tab is available.');
+    const workflow = command.action === 'runWorkflow' ? normalizeWorkflowSteps(command.steps) : [command];
+    const executionTrail = [];
+
+    for (const step of workflow) {
+      const result = await executeSingleAction(step, command.allowedHosts);
+      executionTrail.push({ action: step.action, result });
     }
 
-    if (command.action === 'navigate') {
-      assertAllowedUrl(command.url, command.allowedHosts);
-      await chrome.tabs.update(tab.id, { url: command.url });
-      await waitForTabComplete(tab.id, command.timeoutMs);
-    } else {
-      assertAllowedUrl(tab.url, command.allowedHosts);
-      if (command.action === 'click' || command.action === 'type' || command.action === 'waitForText' || command.action === 'readPage') {
-        const [{ result }] = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: runDomCommand,
-          args: [command]
-        });
-        if (result?.error) {
-          throw new Error(result.error);
-        }
-      }
-    }
-
-    const currentTab = await chrome.tabs.get(tab.id);
+    const currentTab = await getActiveTab();
     const capture = command.captureAfter || command.action === 'capture'
       ? await createCapturePayload(currentTab, command, options)
       : undefined;
-    return { id: command.id, ok: true, result: { action: command.action, url: currentTab.url, title: currentTab.title }, capture };
+    return {
+      id: command.id,
+      ok: true,
+      result: {
+        action: command.action,
+        steps: executionTrail,
+        url: currentTab.url,
+        title: currentTab.title,
+        tabIndex: currentTab.index
+      },
+      capture
+    };
   } catch (error) {
     return { id: command.id, ok: false, error: String(error?.message ?? error) };
   }
+}
+
+function normalizeWorkflowSteps(steps) {
+  if (!Array.isArray(steps) || steps.length === 0) {
+    throw new Error('Workflow has no steps.');
+  }
+
+  return steps.map(step => ({ ...step, action: step.action ?? 'readPage' }));
+}
+
+async function executeSingleAction(command, allowedHosts) {
+  const action = command.action ?? 'readPage';
+
+  if (action === 'navigate') {
+    assertAllowedUrl(command.url, allowedHosts);
+    const tab = await getActiveTab();
+    await chrome.tabs.update(tab.id, { url: command.url });
+    await waitForTabComplete(tab.id, command.timeoutMs);
+    const updated = await chrome.tabs.get(tab.id);
+    return { ok: true, url: updated.url, title: updated.title };
+  }
+
+  if (action === 'openInNewTab') {
+    assertAllowedUrl(command.url, allowedHosts);
+    const created = await chrome.tabs.create({ url: command.url, active: true });
+    if (!created?.id) {
+      throw new Error('Failed to create a new tab.');
+    }
+
+    await waitForTabComplete(created.id, command.timeoutMs);
+    return { ok: true, tabIndex: created.index, url: created.url, title: created.title };
+  }
+
+  if (action === 'switchTab') {
+    if (!Number.isInteger(command.targetTabIndex)) {
+      throw new Error('switchTab requires targetTabIndex.');
+    }
+
+    const target = await getTabByIndex(command.targetTabIndex);
+    await chrome.tabs.update(target.id, { active: true });
+    return { ok: true, tabIndex: target.index, url: target.url, title: target.title };
+  }
+
+  if (action === 'closeTab') {
+    if (!command.confirmDangerous) {
+      throw new Error('closeTab requires confirmDangerous=true.');
+    }
+
+    const tab = Number.isInteger(command.targetTabIndex)
+      ? await getTabByIndex(command.targetTabIndex)
+      : await getActiveTab();
+    await chrome.tabs.remove(tab.id);
+    return { ok: true, closedTabIndex: tab.index };
+  }
+
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+
+  if (action === 'back') {
+    await chrome.tabs.goBack(tab.id).catch(() => undefined);
+    await waitForTabComplete(tab.id, command.timeoutMs).catch(() => undefined);
+    return { ok: true };
+  }
+
+  if (action === 'forward') {
+    await chrome.tabs.goForward(tab.id).catch(() => undefined);
+    await waitForTabComplete(tab.id, command.timeoutMs).catch(() => undefined);
+    return { ok: true };
+  }
+
+  if (action === 'reload') {
+    await chrome.tabs.reload(tab.id);
+    await waitForTabComplete(tab.id, command.timeoutMs);
+    return { ok: true };
+  }
+
+  if (action === 'capture') {
+    return { ok: true };
+  }
+
+  const targets = buildTargetCandidates(command);
+  const maxRetries = Number.isInteger(command.retries) ? command.retries : 0;
+  let lastError = 'Action failed.';
+
+  for (let retry = 0; retry <= maxRetries; retry += 1) {
+    for (const candidate of targets) {
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: runDomCommand,
+        args: [{ ...command, ...candidate }]
+      });
+      if (!result?.error) {
+        return result ?? { ok: true };
+      }
+
+      lastError = result.error;
+    }
+  }
+
+  throw new Error(lastError);
+}
+
+function buildTargetCandidates(command) {
+  const candidates = [{ selector: command.selector, text: command.text, label: command.label, role: command.role, index: command.index }];
+  for (const selector of command.fallbackSelectors ?? []) {
+    candidates.push({ ...candidates[0], selector });
+  }
+  for (const text of command.fallbackTexts ?? []) {
+    candidates.push({ ...candidates[0], selector: undefined, text });
+  }
+
+  return candidates;
+}
+
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    throw new Error('No active browser tab is available.');
+  }
+
+  return tab;
+}
+
+async function getTabByIndex(targetTabIndex) {
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  const target = tabs.find(tab => tab.index === targetTabIndex);
+  if (!target?.id) {
+    throw new Error(`Tab index not found: ${targetTabIndex}`);
+  }
+
+  return target;
 }
 
 async function postCommandResult(options, result) {
@@ -198,43 +325,167 @@ async function createCapturePayload(tab, command, options) {
 function runDomCommand(command) {
   try {
     const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
-    const findByText = text => {
-      const needle = normalize(text).toLowerCase();
-      if (!needle) {
+
+    const isVisible = element => {
+      if (!element) {
+        return false;
+      }
+      const style = window.getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+        return false;
+      }
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+
+    const findByIntent = () => {
+      if (command.selector) {
+        return document.querySelector(command.selector);
+      }
+
+      const query = command.role
+        ? `[role="${command.role}"]`
+        : 'button,[role="button"],[role="tab"],a,input,textarea,select,[tabindex]';
+      const elements = Array.from(document.querySelectorAll(query));
+      const byLabel = normalize(command.label).toLowerCase();
+      if (byLabel) {
+        const matched = elements.filter(element => normalize(element.getAttribute('aria-label') || element.getAttribute('title') || '').toLowerCase().includes(byLabel));
+        if (matched.length > 0) {
+          return matched[Math.max(0, Math.min(command.index ?? 0, matched.length - 1))];
+        }
+      }
+
+      const byText = normalize(command.text).toLowerCase();
+      if (!byText) {
         return undefined;
       }
 
-      return Array.from(document.querySelectorAll('button,[role="button"],[role="tab"],a,input,textarea,select'))
-        .find(element => normalize(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || '').toLowerCase().includes(needle));
+      const matched = elements.filter(element => normalize(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || '').toLowerCase().includes(byText));
+      if (matched.length === 0) {
+        return undefined;
+      }
+
+      return matched[Math.max(0, Math.min(command.index ?? 0, matched.length - 1))];
+    };
+
+    const waitForCondition = condition => new Promise(resolve => {
+      const kind = condition?.kind ?? 'text';
+      const interval = Number.isFinite(condition?.pollIntervalMs) ? Math.max(100, Math.min(5000, condition.pollIntervalMs)) : 400;
+      const deadline = Date.now() + (command.timeoutMs ?? 60000);
+      const spinnerSelector = condition?.selector ?? '[aria-busy="true"], [role="progressbar"], .spinner, .loading';
+
+      const check = () => {
+        if (kind === 'urlMatch') {
+          const pattern = condition?.urlPattern ?? '';
+          if (!pattern) {
+            resolve({ error: 'wait urlMatch requires urlPattern.' });
+            return;
+          }
+
+          const matched = location.href.includes(pattern) || (() => {
+            try {
+              return new RegExp(pattern).test(location.href);
+            } catch {
+              return false;
+            }
+          })();
+          if (matched) {
+            resolve({ ok: true });
+            return;
+          }
+        } else if (kind === 'text') {
+          const needle = normalize(condition?.text ?? command.text);
+          if (needle && normalize(document.body?.innerText ?? '').includes(needle)) {
+            resolve({ ok: true });
+            return;
+          }
+        } else if (kind === 'element') {
+          const element = document.querySelector(condition?.selector ?? command.selector ?? '');
+          if (isVisible(element)) {
+            resolve({ ok: true });
+            return;
+          }
+        } else if (kind === 'elementGone') {
+          const element = document.querySelector(condition?.selector ?? command.selector ?? '');
+          if (!isVisible(element)) {
+            resolve({ ok: true });
+            return;
+          }
+        } else if (kind === 'spinnerGone') {
+          const spinner = Array.from(document.querySelectorAll(spinnerSelector)).find(isVisible);
+          if (!spinner) {
+            resolve({ ok: true });
+            return;
+          }
+        }
+
+        if (Date.now() >= deadline) {
+          resolve({ error: `Wait condition timed out: ${kind}` });
+          return;
+        }
+
+        setTimeout(check, interval);
+      };
+
+      check();
+    });
+
+    const listInteractables = () => {
+      const elements = Array.from(document.querySelectorAll('button,[role="button"],[role="tab"],a,input,textarea,select,[tabindex]'))
+        .filter(isVisible)
+        .slice(0, 300)
+        .map((element, index) => ({
+          index,
+          tag: element.tagName.toLowerCase(),
+          role: element.getAttribute('role') || undefined,
+          id: element.id || undefined,
+          classes: element.className || undefined,
+          text: normalize(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || ''),
+          selectorHint: element.id ? `#${element.id}` : undefined
+        }));
+      return { ok: true, interactables: elements };
     };
 
     if (command.action === 'readPage') {
       return { ok: true };
     }
 
-    if (command.action === 'waitForText') {
-      const needle = normalize(command.text);
-      return new Promise(resolve => {
-        const deadline = Date.now() + (command.timeoutMs ?? 60000);
-        const check = () => {
-          const pageText = normalize(document.body?.innerText ?? '');
-          if (pageText.includes(needle)) {
-            resolve({ ok: true });
-            return;
-          }
-
-          if (Date.now() >= deadline) {
-            resolve({ error: `Text not found: ${command.text}` });
-            return;
-          }
-
-          setTimeout(check, 500);
-        };
-        check();
-      });
+    if (command.action === 'listInteractables') {
+      return listInteractables();
     }
 
-    const element = command.selector ? document.querySelector(command.selector) : findByText(command.text);
+    if (command.action === 'wait') {
+      return waitForCondition(command.wait);
+    }
+
+    if (command.action === 'waitForText') {
+      return waitForCondition({ kind: 'text', text: command.text, pollIntervalMs: command.wait?.pollIntervalMs });
+    }
+
+    if (command.action === 'scroll') {
+      const step = Number.isFinite(command.delta) ? command.delta : 800;
+      const deltaY = command.direction === 'up' ? -Math.abs(step) : Math.abs(step);
+      window.scrollBy({ top: deltaY, behavior: 'smooth' });
+      return { ok: true, deltaY };
+    }
+
+    if (command.action === 'keyPress') {
+      const key = command.key || command.value;
+      if (!key) {
+        return { error: 'keyPress requires key.' };
+      }
+
+      const target = command.selector ? document.querySelector(command.selector) : document.activeElement || document.body;
+      if (!target) {
+        return { error: 'No target for keyPress.' };
+      }
+
+      target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+      return { ok: true, key };
+    }
+
+    const element = findByIntent();
     if (!element) {
       return { error: command.selector ? `Element not found: ${command.selector}` : `Element text not found: ${command.text}` };
     }
@@ -243,6 +494,39 @@ function runDomCommand(command) {
     if (command.action === 'click') {
       element.click();
       return { ok: true };
+    }
+
+    if (command.action === 'hover') {
+      element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      return { ok: true };
+    }
+
+    if (command.action === 'clearInput') {
+      const input = element;
+      input.focus();
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true };
+    }
+
+    if (command.action === 'selectOption') {
+      if (element.tagName?.toLowerCase() !== 'select') {
+        return { error: 'selectOption requires a <select> target.' };
+      }
+
+      const select = element;
+      const candidates = [command.value, ...(Array.isArray(command.options) ? command.options : [])].filter(Boolean);
+      const option = Array.from(select.options).find(item => candidates.includes(item.value) || candidates.includes(normalize(item.textContent || '')));
+      if (!option) {
+        return { error: 'No matching select option.' };
+      }
+
+      select.value = option.value;
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, value: option.value };
     }
 
     if (command.action === 'type') {

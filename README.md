@@ -48,7 +48,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.5.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.6.vsix --force
 ```
 
 macOS terminal:
@@ -58,7 +58,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.5.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.6.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -174,6 +174,12 @@ For paired browser control on allowed hosts:
 ```
 
 Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
+
+Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, and `runWorkflow`.
+
+`#browserAct` supports `preset`, `steps`, `retries`, `fallbackSelectors`, and `fallbackTexts` so Copilot can run resilient multi-step browser workflows on allowed hosts.
+
+`closeTab` is safety-gated and requires `confirmDangerous: true`.
 
 Copilot can also read the generated Markdown/JSON/PNG files directly from the workspace.
 

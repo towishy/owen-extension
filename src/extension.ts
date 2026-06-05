@@ -50,16 +50,66 @@ type CaptureGroupSummary = {
 	captures: StoredCapture[];
 };
 
-type BrowserActInput = {
-	action?: 'readPage' | 'capture' | 'click' | 'type' | 'navigate' | 'waitForText';
+type BrowserWaitCondition = {
+	kind?: 'text' | 'element' | 'elementGone' | 'urlMatch' | 'spinnerGone';
+	text?: string;
+	selector?: string;
+	urlPattern?: string;
+	pollIntervalMs?: number;
+};
+
+type BrowserStepInput = {
+	action?: BrowserAction;
 	selector?: string;
 	text?: string;
 	value?: string;
 	url?: string;
+	key?: string;
+	role?: string;
+	label?: string;
+	index?: number;
+	direction?: 'up' | 'down';
+	delta?: number;
+	options?: string[];
+	wait?: BrowserWaitCondition;
 	timeoutMs?: number;
+	retries?: number;
+	fallbackSelectors?: string[];
+	fallbackTexts?: string[];
+	targetTabIndex?: number;
+	confirmDangerous?: boolean;
 	captureAfter?: boolean;
 	includeScreenshot?: boolean;
 	includeHtml?: boolean;
+};
+
+type BrowserPreset = 'defenderIncidentSurvey' | 'defenderIncidentAlerts' | 'defenderIncidentEvidence';
+
+type BrowserAction =
+	| 'readPage'
+	| 'capture'
+	| 'click'
+	| 'type'
+	| 'navigate'
+	| 'waitForText'
+	| 'wait'
+	| 'scroll'
+	| 'hover'
+	| 'keyPress'
+	| 'selectOption'
+	| 'clearInput'
+	| 'back'
+	| 'forward'
+	| 'reload'
+	| 'openInNewTab'
+	| 'switchTab'
+	| 'closeTab'
+	| 'listInteractables'
+	| 'runWorkflow';
+
+type BrowserActInput = BrowserStepInput & {
+	preset?: BrowserPreset;
+	steps?: BrowserStepInput[];
 	investigationName?: string;
 };
 
@@ -70,6 +120,21 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	text?: string;
 	value?: string;
 	url?: string;
+	key?: string;
+	role?: string;
+	label?: string;
+	index?: number;
+	direction?: 'up' | 'down';
+	delta?: number;
+	options?: string[];
+	wait?: BrowserWaitCondition;
+	retries: number;
+	fallbackSelectors: string[];
+	fallbackTexts: string[];
+	targetTabIndex?: number;
+	confirmDangerous: boolean;
+	steps: BrowserStepInput[];
+	preset?: BrowserPreset;
 	investigationName?: string;
 	allowedHosts: string[];
 };
@@ -343,35 +408,36 @@ function createBrowserActTool(context: vscode.ExtensionContext): vscode.Language
 	};
 }
 
+const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
+	'readPage', 'capture', 'click', 'type', 'navigate', 'waitForText', 'wait', 'scroll', 'hover', 'keyPress',
+	'selectOption', 'clearInput', 'back', 'forward', 'reload', 'openInNewTab', 'switchTab', 'closeTab',
+	'listInteractables', 'runWorkflow'
+];
+
+const DESTRUCTIVE_BROWSER_ACTIONS: BrowserAction[] = ['closeTab'];
+
 function createBrowserCommand(input: BrowserActInput): BrowserCommand {
-	const action = input.action ?? 'readPage';
+	const action = (input.action ?? 'readPage') as BrowserAction;
 	const timeoutMs = clampTimeout(input.timeoutMs);
-	if (!['readPage', 'capture', 'click', 'type', 'navigate', 'waitForText'].includes(action)) {
+	const retries = clampRetries(input.retries);
+	const allowedHosts = getConfig().get<string[]>('allowedHosts', []);
+	const presetSteps = expandPreset(input.preset);
+	const workflowSteps = normalizeSteps(input.steps);
+
+	if (!SUPPORTED_BROWSER_ACTIONS.includes(action)) {
 		throw new Error(`Unsupported browser action: ${String(action)}`);
 	}
 
-	if (action === 'navigate') {
-		const pageUrl = parseUrl(input.url);
-		if (!pageUrl) {
-			throw new Error('browserAct navigate requires a valid url.');
-		}
-
-		const allowedHosts = getConfig().get<string[]>('allowedHosts', []);
-		if (allowedHosts.length > 0 && !isAllowedHost(pageUrl.hostname, allowedHosts)) {
-			throw new Error(`Navigation host is not allowed: ${pageUrl.hostname}`);
-		}
+	validateBrowserStep({ ...input, action }, allowedHosts, true);
+	for (const step of workflowSteps) {
+		validateBrowserStep(step, allowedHosts, false);
+	}
+	for (const step of presetSteps) {
+		validateBrowserStep(step, allowedHosts, false);
 	}
 
-	if (action === 'click' && !input.selector && !input.text) {
-		throw new Error('browserAct click requires selector or text.');
-	}
-
-	if (action === 'type' && (!input.selector || typeof input.value !== 'string')) {
-		throw new Error('browserAct type requires selector and value.');
-	}
-
-	if (action === 'waitForText' && !input.text) {
-		throw new Error('browserAct waitForText requires text.');
+	if (action === 'runWorkflow' && presetSteps.length === 0 && workflowSteps.length === 0) {
+		throw new Error('browserAct runWorkflow requires preset or steps.');
 	}
 
 	return {
@@ -380,20 +446,129 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		createdAt: new Date().toISOString(),
 		selector: input.selector,
 		text: input.text,
-		value: action === 'type' ? input.value : undefined,
+		value: input.value,
 		url: input.url,
+		key: input.key,
+		role: input.role,
+		label: input.label,
+		index: input.index,
+		direction: input.direction,
+		delta: input.delta,
+		options: Array.isArray(input.options) ? input.options.filter(Boolean) : undefined,
+		wait: input.wait,
+		retries,
+		fallbackSelectors: sanitizeStringList(input.fallbackSelectors),
+		fallbackTexts: sanitizeStringList(input.fallbackTexts),
+		targetTabIndex: input.targetTabIndex,
+		confirmDangerous: Boolean(input.confirmDangerous),
+		steps: [...presetSteps, ...workflowSteps],
+		preset: input.preset,
 		timeoutMs,
-		captureAfter: input.captureAfter ?? true,
+		captureAfter: input.captureAfter ?? (action !== 'listInteractables'),
 		includeScreenshot: input.includeScreenshot ?? true,
 		includeHtml: input.includeHtml ?? false,
 		investigationName: input.investigationName,
-		allowedHosts: getConfig().get<string[]>('allowedHosts', [])
+		allowedHosts
 	};
+}
+
+function normalizeSteps(steps: BrowserStepInput[] | undefined) {
+	if (!Array.isArray(steps)) {
+		return [];
+	}
+
+	return steps
+		.map(step => ({ ...step, action: (step.action ?? 'readPage') as BrowserAction }))
+		.slice(0, 40);
+}
+
+function sanitizeStringList(values: string[] | undefined) {
+	if (!Array.isArray(values)) {
+		return [];
+	}
+
+	return values.map(item => item.trim()).filter(Boolean).slice(0, 10);
+}
+
+function expandPreset(preset: BrowserPreset | undefined): BrowserStepInput[] {
+	if (!preset) {
+		return [];
+	}
+
+	if (preset === 'defenderIncidentSurvey') {
+		return [
+			{ action: 'wait', wait: { kind: 'element', selector: '[role="tab"]' } },
+			{ action: 'click', text: 'Overview' },
+			{ action: 'wait', wait: { kind: 'text', text: 'Overview' } },
+			{ action: 'capture' }
+		];
+	}
+
+	if (preset === 'defenderIncidentAlerts') {
+		return [
+			{ action: 'wait', wait: { kind: 'element', selector: '[role="tab"]' } },
+			{ action: 'click', text: 'Alerts' },
+			{ action: 'wait', wait: { kind: 'urlMatch', urlPattern: '/alerts' } },
+			{ action: 'capture' }
+		];
+	}
+
+	return [
+		{ action: 'wait', wait: { kind: 'element', selector: '[role="tab"]' } },
+		{ action: 'click', text: 'Evidence' },
+		{ action: 'wait', wait: { kind: 'urlMatch', urlPattern: '/evidence' } },
+		{ action: 'capture' }
+	];
+}
+
+function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], topLevel: boolean) {
+	const action = (step.action ?? 'readPage') as BrowserAction;
+	if (!SUPPORTED_BROWSER_ACTIONS.includes(action)) {
+		throw new Error(`Unsupported browser action: ${String(action)}`);
+	}
+
+	if (DESTRUCTIVE_BROWSER_ACTIONS.includes(action) && !step.confirmDangerous) {
+		throw new Error(`browserAct ${action} requires confirmDangerous=true.`);
+	}
+
+	if (action === 'navigate' || action === 'openInNewTab') {
+		const pageUrl = parseUrl(step.url);
+		if (!pageUrl) {
+			throw new Error(`browserAct ${action} requires a valid url.`);
+		}
+		if (allowedHosts.length > 0 && !isAllowedHost(pageUrl.hostname, allowedHosts)) {
+			throw new Error(`Navigation host is not allowed: ${pageUrl.hostname}`);
+		}
+	}
+
+	if ((action === 'click' || action === 'hover') && !step.selector && !step.text && !step.label) {
+		throw new Error(`browserAct ${action} requires selector, text, or label.`);
+	}
+
+	if (action === 'type' && typeof step.value !== 'string') {
+		throw new Error('browserAct type requires value.');
+	}
+
+	if (action === 'type' && !step.selector && !step.text && !step.label) {
+		throw new Error('browserAct type requires selector, text, or label.');
+	}
+
+	if (action === 'waitForText' && !step.text) {
+		throw new Error('browserAct waitForText requires text.');
+	}
+
+	if (action === 'wait' && !step.wait?.kind) {
+		throw new Error('browserAct wait requires wait.kind.');
+	}
+
+	if (action === 'runWorkflow' && !topLevel) {
+		throw new Error('runWorkflow can only be used as the top-level action.');
+	}
 }
 
 function enqueueBrowserCommand(command: BrowserCommand) {
 	browserCommandQueue.push(command);
-	output.appendLine(`Queued browser command ${command.id}: ${command.action}`);
+	output.appendLine(`Queued browser command ${command.id}: ${command.action} (queue: ${browserCommandQueue.length})`);
 	return new Promise<BrowserCommandCompletion>((resolve, reject) => {
 		const timeout = setTimeout(() => {
 			browserCommandWaiters.delete(command.id);
@@ -410,6 +585,7 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 
 	const waiter = browserCommandWaiters.get(completion.id);
 	if (!waiter) {
+		await appendBrowserActionLog(context, completion.id, completion, undefined);
 		return completion;
 	}
 
@@ -420,6 +596,7 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 	}
 
 	const result = { ...completion, storedCapture };
+	await appendBrowserActionLog(context, completion.id, completion, storedCapture);
 	clearTimeout(waiter.timeout);
 	browserCommandWaiters.delete(completion.id);
 	if (completion.ok === false) {
@@ -439,11 +616,25 @@ function clampTimeout(timeoutMs: number | undefined) {
 	return Math.min(Math.max(Math.trunc(timeoutMs), 1000), 120000);
 }
 
+function clampRetries(retries: number | undefined) {
+	if (typeof retries !== 'number' || !Number.isFinite(retries)) {
+		return 1;
+	}
+
+	return Math.min(Math.max(Math.trunc(retries), 0), 3);
+}
+
 function renderBrowserActMessage(command: BrowserCommand, completion: BrowserCommandCompletion) {
 	const lines = [
 		`Browser action completed: ${command.action}`,
 		`Command: ${command.id}`
 	];
+	if (command.preset) {
+		lines.push(`Preset: ${command.preset}`);
+	}
+	if (command.steps.length > 0) {
+		lines.push(`Workflow steps: ${command.steps.length}`);
+	}
 	if (completion.storedCapture) {
 		lines.push(`Stored capture: ${completion.storedCapture.markdownPath}`);
 	}
@@ -451,6 +642,27 @@ function renderBrowserActMessage(command: BrowserCommand, completion: BrowserCom
 		lines.push(`Result: ${JSON.stringify(completion.result).slice(0, 4000)}`);
 	}
 	return lines.join('\n');
+}
+
+async function appendBrowserActionLog(context: vscode.ExtensionContext, commandId: string, completion: BrowserCommandResult, storedCapture: StoredCapture | undefined) {
+	const baseDir = await getCaptureBaseDir(context);
+	const logDir = path.join(baseDir, '_action-logs');
+	await fs.mkdir(logDir, { recursive: true });
+	const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+	const line = JSON.stringify({
+		loggedAt: new Date().toISOString(),
+		commandId,
+		ok: completion.ok !== false,
+		error: completion.error,
+		result: completion.result,
+		storedCapture: storedCapture ? {
+			id: storedCapture.id,
+			groupName: storedCapture.groupName,
+			url: storedCapture.url,
+			markdownPath: storedCapture.markdownPath
+		} : undefined
+	});
+	await fs.appendFile(path.join(logDir, `browser-actions-${day}.jsonl`), `${line}\n`, 'utf8');
 }
 
 async function captureToolResult(capture: StoredCapture) {

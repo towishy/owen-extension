@@ -4,6 +4,15 @@ All notable changes to the "owen-browser-bridge" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+## [0.1.6] - 2026-06-05
+
+- Expanded `#browserAct` into advanced browser automation with workflow execution (`runWorkflow`), resilient targeting (`retries`, `fallbackSelectors`, `fallbackTexts`), and optional presets.
+- Added richer action coverage: wait conditions, interactable listing, scroll/hover/key press/select/clear input, browser history controls, and tab lifecycle actions.
+- Added safety confirmation gating for destructive browser actions such as tab close.
+- Updated tool schema and usage documentation for advanced browser control.
+
 ## [0.1.5] - 2026-06-05
 
 - Fixed browser-injected action and capture functions so page text, metadata, click-by-text, type, and wait-for-text work inside Chrome/Edge tab contexts.
