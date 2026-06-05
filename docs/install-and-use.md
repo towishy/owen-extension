@@ -31,7 +31,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.1.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.3.vsix --force
 ```
 
 macOS terminal:
@@ -41,7 +41,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.1.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.3.vsix --force
 ```
 
 If `code` is unavailable, open VS Code and run `Shell Command: Install 'code' command in PATH`.
@@ -117,8 +117,9 @@ The local server listens on `http://127.0.0.1:17321` by default.
 6. In Chrome or Edge, click the Owen Capture browser extension icon.
 7. Keep `VS Code Port` as `17321`, unless you changed `owenBrowserBridge.port`.
 8. Paste the copied token into **Pairing Token**.
-9. Select whether to include **screenshot** and **HTML snapshot**.
-10. Click **Save Settings**.
+9. Optionally enter an **Investigation / Case** name such as `incident-12345` when you plan to capture several tabs for the same investigation.
+10. Select whether to include **screenshot** and **HTML snapshot**.
+11. Click **Save Settings**.
 
 If you need to rotate the token, click **Regenerate and Copy Token** on the setup page, then paste the new token into the browser extension and click **Save Settings** again.
 
@@ -132,11 +133,15 @@ If you need to rotate the token, click **Regenerate and Copy Token** on the setu
 The capture is stored under the folder shown in **Capture Directory** on the setup page. By default, this is:
 
 ```text
-raw/browser-captures/YYYYMM/
+raw/browser-captures/<host>/<group>/
+  _index.json
+  _summary.md
   capture-*.json
   capture-*.md
   capture-*.png
 ```
+
+The `<host>` folder comes from the captured page hostname. The `<group>` folder uses **Investigation / Case** when provided, otherwise the extension tries to infer an incident or alert id from the URL and falls back to the capture date.
 
 ## 6. Ask Copilot to Analyze It
 
@@ -151,6 +156,14 @@ For a specific capture:
 ```text
 #readBrowserCapture capture-20260605T120000Z-a1b2c3 이 캡처를 기반으로 조사 보고서 초안을 만들어줘.
 ```
+
+For all captures in a related host or investigation group:
+
+```text
+#readBrowserCaptureGroup security.microsoft.com/incident-12345 이 폴더의 모든 캡처를 하나의 Defender 인시던트 흐름으로 연관 분석해줘.
+```
+
+If you omit the group, `#readBrowserCaptureGroup` reads the latest capture group. If you pass only a host such as `security.microsoft.com`, it reads that host's newest group.
 
 If tool reference is unavailable in your Copilot Chat build, open the generated Markdown file and ask Copilot to analyze the current file plus adjacent JSON/PNG capture assets.
 

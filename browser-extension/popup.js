@@ -1,6 +1,7 @@
 const DEFAULT_OPTIONS = {
   port: 17321,
   token: '',
+  investigationName: '',
   includeHtml: false,
   includeScreenshot: true
 };
@@ -8,6 +9,7 @@ const DEFAULT_OPTIONS = {
 const elements = {
   port: document.getElementById('port'),
   token: document.getElementById('token'),
+  investigationName: document.getElementById('investigationName'),
   includeHtml: document.getElementById('includeHtml'),
   includeScreenshot: document.getElementById('includeScreenshot'),
   save: document.getElementById('save'),
@@ -49,6 +51,7 @@ async function loadOptions() {
   const options = await chrome.storage.sync.get(DEFAULT_OPTIONS);
   elements.port.value = String(options.port);
   elements.token.value = options.token;
+  elements.investigationName.value = options.investigationName;
   elements.includeHtml.checked = options.includeHtml;
   elements.includeScreenshot.checked = options.includeScreenshot;
 }
@@ -57,6 +60,7 @@ async function saveOptions() {
   await chrome.storage.sync.set({
     port: Number(elements.port.value || DEFAULT_OPTIONS.port),
     token: elements.token.value.trim(),
+    investigationName: elements.investigationName.value.trim(),
     includeHtml: elements.includeHtml.checked,
     includeScreenshot: elements.includeScreenshot.checked
   });

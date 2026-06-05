@@ -8,6 +8,9 @@ type BrowserCapturePayload = {
 	source?: string;
 	version?: string;
 	collectedAt?: string;
+	investigation?: {
+		name?: string;
+	};
 	page?: {
 		url?: string;
 		title?: string;
@@ -25,12 +28,26 @@ type BrowserCapturePayload = {
 type StoredCapture = {
 	id: string;
 	folder: string;
+	host: string;
+	groupName: string;
 	jsonPath: string;
 	markdownPath: string;
 	screenshotPath?: string;
 	url?: string;
 	title?: string;
 	collectedAt: string;
+};
+
+type CaptureGroupSummary = {
+	host: string;
+	groupName: string;
+	folder: string;
+	captureCount: number;
+	timeRange?: {
+		from: string;
+		to: string;
+	};
+	captures: StoredCapture[];
 };
 
 let server: http.Server | undefined;
@@ -50,7 +67,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('owen-browser-bridge.copyPairingToken', async () => copyPairingToken(context)),
 		vscode.commands.registerCommand('owen-browser-bridge.regeneratePairingToken', async () => regeneratePairingToken(context)),
 		vscode.lm.registerTool('get_latest_browser_capture', createLatestCaptureTool(context)),
-		vscode.lm.registerTool('read_browser_capture', createReadCaptureTool(context))
+		vscode.lm.registerTool('read_browser_capture', createReadCaptureTool(context)),
+		vscode.lm.registerTool('read_browser_capture_group', createReadCaptureGroupTool(context))
 	);
 
 	if (getConfig().get<boolean>('autoStart', true)) {
@@ -148,8 +166,10 @@ async function storeCapture(context: vscode.ExtensionContext, payload: BrowserCa
 	const collectedAt = payload.collectedAt ?? new Date().toISOString();
 	const id = `capture-${formatTimestamp(collectedAt)}-${crypto.randomBytes(3).toString('hex')}`;
 	const baseDir = await getCaptureBaseDir(context);
-	const month = collectedAt.slice(0, 7).replace('-', '');
-	const folder = path.join(baseDir, month);
+	const pageUrl = parseUrl(payload.page?.url);
+	const host = pageUrl?.hostname.toLowerCase() ?? 'unknown-host';
+	const groupName = getCaptureGroupName(payload, pageUrl, collectedAt);
+	const folder = path.join(baseDir, sanitizePathSegment(host), sanitizePathSegment(groupName));
 	await fs.mkdir(folder, { recursive: true });
 
 	const redactedPayload = redactPayload(payload);
@@ -164,11 +184,11 @@ async function storeCapture(context: vscode.ExtensionContext, payload: BrowserCa
 
 	await fs.writeFile(jsonPath, JSON.stringify(redactedPayload, null, 2), 'utf8');
 	await fs.writeFile(markdownPath, renderMarkdown(redactedPayload, screenshotPath ? path.basename(screenshotPath) : undefined), 'utf8');
-	output.appendLine(`Stored capture ${id}: ${markdownPath}`);
-
-	return {
+	const stored = {
 		id,
 		folder,
+		host,
+		groupName,
 		jsonPath,
 		markdownPath,
 		screenshotPath,
@@ -176,6 +196,10 @@ async function storeCapture(context: vscode.ExtensionContext, payload: BrowserCa
 		title: redactedPayload.page?.title,
 		collectedAt
 	};
+	await updateCaptureGroupFiles(folder, stored);
+	output.appendLine(`Stored capture ${id}: ${markdownPath}`);
+
+	return stored;
 }
 
 async function showLatestCapture(context: vscode.ExtensionContext) {
@@ -230,6 +254,19 @@ function createReadCaptureTool(context: vscode.ExtensionContext): vscode.Languag
 	};
 }
 
+function createReadCaptureGroupTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<{ group?: string }> {
+	return {
+		async invoke(options) {
+			const group = options.input.group?.trim();
+			const summary = await resolveCaptureGroup(context, group);
+			return captureGroupToolResult(summary);
+		},
+		prepareInvocation(options) {
+			return { invocationMessage: `Reading browser capture group ${options.input.group ?? 'latest'}` };
+		}
+	};
+}
+
 async function captureToolResult(capture: StoredCapture) {
 	const markdown = await fs.readFile(capture.markdownPath, 'utf8').catch(() => '');
 	const json = await fs.readFile(capture.jsonPath, 'utf8').then(text => JSON.parse(text)).catch(() => undefined);
@@ -238,6 +275,25 @@ async function captureToolResult(capture: StoredCapture) {
 		vscode.LanguageModelDataPart.text(markdown, 'text/markdown'),
 		...(json ? [vscode.LanguageModelDataPart.json(json)] : []),
 		vscode.LanguageModelDataPart.text(capture.screenshotPath ? `Screenshot path: ${capture.screenshotPath}` : 'No screenshot was stored.', 'text/plain')
+	]);
+}
+
+async function captureGroupToolResult(summary: CaptureGroupSummary) {
+	const captures = [];
+	for (const capture of summary.captures) {
+		captures.push({
+			metadata: capture,
+			markdown: await fs.readFile(capture.markdownPath, 'utf8').catch(() => ''),
+			json: await fs.readFile(capture.jsonPath, 'utf8').then(text => JSON.parse(text)).catch(() => undefined)
+		});
+	}
+
+	const summaryMarkdown = await fs.readFile(path.join(summary.folder, '_summary.md'), 'utf8').catch(() => renderCaptureGroupMarkdown(summary));
+	return new vscode.LanguageModelToolResult([
+		vscode.LanguageModelDataPart.json(summary),
+		vscode.LanguageModelDataPart.text(summaryMarkdown, 'text/markdown'),
+		vscode.LanguageModelDataPart.json(captures),
+		vscode.LanguageModelDataPart.text('Analyze these browser captures as one related investigation. Correlate URLs, timestamps, entities, visible evidence, screenshots, missing context, risk, and next actions.', 'text/plain')
 	]);
 }
 
@@ -256,14 +312,53 @@ async function resolveCapture(context: vscode.ExtensionContext, idOrPath: string
 	return captureFromPaths(parsed.name, jsonPath, path.join(parsed.dir, `${parsed.name}.md`));
 }
 
+async function resolveCaptureGroup(context: vscode.ExtensionContext, group: string | undefined): Promise<CaptureGroupSummary> {
+	const baseDir = await getCaptureBaseDir(context);
+	if (!group) {
+		const latest = context.globalState.get<StoredCapture>('latestCapture');
+		if (!latest) {
+			throw new Error('No capture group was provided, and there is no latest capture.');
+		}
+
+		return readCaptureGroup(latest.folder);
+	}
+
+	const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+	const directPath = path.isAbsolute(group) ? group : path.resolve(workspaceFolder, group);
+	if (await isDirectory(directPath)) {
+		return readResolvableCaptureGroup(directPath);
+	}
+
+	const normalizedGroup = group.replace(/^[\\/]+|[\\/]+$/g, '');
+	const groupParts = normalizedGroup.split(/[\\/]/).filter(Boolean);
+	const relativeCandidates = groupParts.length === 1
+		? await latestGroupFoldersForHost(baseDir, sanitizePathSegment(groupParts[0]))
+		: [
+			normalizedGroup,
+			groupParts.map(sanitizePathSegment).join(path.sep)
+		];
+
+	for (const candidate of relativeCandidates) {
+		const folder = path.resolve(baseDir, candidate);
+		if (await isDirectory(folder)) {
+			return readResolvableCaptureGroup(folder);
+		}
+	}
+
+	throw new Error(`Browser capture group not found: ${group}`);
+}
+
 async function captureFromPaths(id: string, jsonPath: string, markdownPath: string): Promise<StoredCapture> {
 	const jsonText = await fs.readFile(jsonPath, 'utf8');
 	const payload = JSON.parse(jsonText) as BrowserCapturePayload;
 	const screenshotPath = path.join(path.dirname(jsonPath), `${id}.png`);
 	const hasScreenshot = await fs.stat(screenshotPath).then(() => true).catch(() => false);
+	const pageUrl = parseUrl(payload.page?.url);
 	return {
 		id,
 		folder: path.dirname(jsonPath),
+		host: pageUrl?.hostname.toLowerCase() ?? path.basename(path.dirname(path.dirname(jsonPath))),
+		groupName: path.basename(path.dirname(jsonPath)),
 		jsonPath,
 		markdownPath,
 		screenshotPath: hasScreenshot ? screenshotPath : undefined,
@@ -274,18 +369,103 @@ async function captureFromPaths(id: string, jsonPath: string, markdownPath: stri
 }
 
 async function findCaptureJson(baseDir: string, id: string): Promise<string> {
-	const months = await fs.readdir(baseDir, { withFileTypes: true }).catch(() => []);
-	for (const month of months) {
-		if (!month.isDirectory()) {
+	return findFileRecursive(baseDir, `${id}.json`, `Browser capture not found: ${id}`);
+}
+
+async function updateCaptureGroupFiles(folder: string, latestCapture: StoredCapture) {
+	const summary = await readCaptureGroup(folder, latestCapture);
+	await fs.writeFile(path.join(folder, '_index.json'), JSON.stringify(summary, null, 2), 'utf8');
+	await fs.writeFile(path.join(folder, '_summary.md'), renderCaptureGroupMarkdown(summary), 'utf8');
+}
+
+async function readCaptureGroup(folder: string, knownCapture?: StoredCapture): Promise<CaptureGroupSummary> {
+	const entries = await fs.readdir(folder, { withFileTypes: true });
+	const captures = [];
+	for (const entry of entries) {
+		if (!entry.isFile() || !entry.name.endsWith('.json') || entry.name.startsWith('_')) {
 			continue;
 		}
-		const candidate = path.join(baseDir, month.name, `${id}.json`);
-		if (await fs.stat(candidate).then(() => true).catch(() => false)) {
+
+		const id = path.basename(entry.name, '.json');
+		const jsonPath = path.join(folder, entry.name);
+		const markdownPath = path.join(folder, `${id}.md`);
+		if (knownCapture?.id === id) {
+			captures.push(knownCapture);
+			continue;
+		}
+
+		captures.push(await captureFromPaths(id, jsonPath, markdownPath));
+	}
+
+	captures.sort((left, right) => left.collectedAt.localeCompare(right.collectedAt));
+	const first = captures[0];
+	const last = captures[captures.length - 1];
+	return {
+		host: first?.host ?? path.basename(path.dirname(folder)),
+		groupName: first?.groupName ?? path.basename(folder),
+		folder,
+		captureCount: captures.length,
+		timeRange: first && last ? { from: first.collectedAt, to: last.collectedAt } : undefined,
+		captures
+	};
+}
+
+async function readResolvableCaptureGroup(folder: string) {
+	const summary = await readCaptureGroup(folder);
+	if (summary.captureCount > 0) {
+		return summary;
+	}
+
+	const latestChild = await latestChildGroupFolder(folder);
+	if (latestChild) {
+		return readCaptureGroup(latestChild);
+	}
+
+	return summary;
+}
+
+async function latestChildGroupFolder(folder: string) {
+	const entries = await fs.readdir(folder, { withFileTypes: true }).catch(() => []);
+	const childFolders = entries
+		.filter(entry => entry.isDirectory())
+		.map(entry => path.join(folder, entry.name))
+		.sort()
+		.reverse();
+	return childFolders[0];
+}
+
+async function latestGroupFoldersForHost(baseDir: string, hostSegment: string) {
+	const hostFolder = path.join(baseDir, hostSegment);
+	const entries = await fs.readdir(hostFolder, { withFileTypes: true }).catch(() => []);
+	return entries
+		.filter(entry => entry.isDirectory())
+		.map(entry => path.join(hostSegment, entry.name))
+		.sort()
+		.reverse()
+		.slice(0, 1);
+}
+
+async function findFileRecursive(folder: string, fileName: string, notFoundMessage: string): Promise<string> {
+	const entries = await fs.readdir(folder, { withFileTypes: true }).catch(() => []);
+	for (const entry of entries) {
+		const candidate = path.join(folder, entry.name);
+		if (entry.isFile() && entry.name === fileName) {
 			return candidate;
+		}
+
+		if (entry.isDirectory()) {
+			const found = await findFileRecursive(candidate, fileName, '').catch(() => undefined);
+			if (found) {
+				return found;
+			}
 		}
 	}
 
-	throw new Error(`Browser capture not found: ${id}`);
+	throw new Error(notFoundMessage);
+}
+
+async function isDirectory(candidate: string) {
+	return fs.stat(candidate).then(stat => stat.isDirectory()).catch(() => false);
 }
 
 async function openCapturesFolder(context: vscode.ExtensionContext) {
@@ -669,6 +849,63 @@ async function getCaptureBaseDir(context: vscode.ExtensionContext) {
 	return path.join(context.globalStorageUri.fsPath, configured);
 }
 
+function parseUrl(value: string | undefined) {
+	if (!value) {
+		return undefined;
+	}
+
+	try {
+		return new URL(value);
+	} catch {
+		return undefined;
+	}
+}
+
+function getCaptureGroupName(payload: BrowserCapturePayload, pageUrl: URL | undefined, collectedAt: string) {
+	const explicitName = payload.investigation?.name?.trim();
+	if (explicitName) {
+		return explicitName;
+	}
+
+	const inferredName = inferInvestigationName(pageUrl);
+	if (inferredName) {
+		return inferredName;
+	}
+
+	return collectedAt.slice(0, 10).replace(/-/g, '');
+}
+
+function inferInvestigationName(pageUrl: URL | undefined) {
+	if (!pageUrl) {
+		return undefined;
+	}
+
+	for (const key of ['incidentId', 'incidentid', 'incident', 'alertId', 'alertid', 'alert']) {
+		const value = pageUrl.searchParams.get(key);
+		if (value) {
+			return `${key.toLowerCase()}-${value}`;
+		}
+	}
+
+	const segments = pageUrl.pathname.split('/').filter(Boolean);
+	for (let index = 0; index < segments.length - 1; index += 1) {
+		const segment = segments[index].toLowerCase();
+		if (['incident', 'incidents', 'alert', 'alerts'].includes(segment)) {
+			return `${segment.replace(/s$/, '')}-${segments[index + 1]}`;
+		}
+	}
+
+	return undefined;
+}
+
+function sanitizePathSegment(value: string) {
+	return (value || 'unknown')
+		.toLowerCase()
+		.replace(/[^a-z0-9._-]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.slice(0, 120) || 'unknown';
+}
+
 function redactPayload(payload: BrowserCapturePayload): BrowserCapturePayload {
 	const copy = JSON.parse(JSON.stringify(payload)) as BrowserCapturePayload;
 	if (copy.page) {
@@ -757,6 +994,40 @@ function renderMarkdown(payload: BrowserCapturePayload, screenshotFile?: string)
 	}
 
 	lines.push('## Copilot Prompt', '', 'Analyze this browser capture using the JSON, visible text, metadata, and screenshot stored next to this note. Highlight evidence, risk, likely next actions, and missing context.', '');
+	return lines.join('\n');
+}
+
+function renderCaptureGroupMarkdown(summary: CaptureGroupSummary) {
+	const lines = [
+		'---',
+		'type: browser-capture-group',
+		`created: ${new Date().toISOString().slice(0, 10)}`,
+		'tags: [type/browser-capture-group]',
+		'---',
+		'',
+		`# ${summary.host} - ${summary.groupName}`,
+		'',
+		'> [!summary]',
+		`> Host: ${summary.host}`,
+		`> Group: ${summary.groupName}`,
+		`> Captures: ${summary.captureCount}`,
+		`> Time range: ${summary.timeRange ? `${summary.timeRange.from} to ${summary.timeRange.to}` : '(none)'}`,
+		'',
+		'## Captures',
+		''
+	];
+
+	for (const capture of summary.captures) {
+		lines.push(`- ${capture.collectedAt} - [[${path.basename(capture.markdownPath)}|${capture.title ?? capture.id}]] - ${capture.url ?? '(unknown URL)'}`);
+	}
+
+	lines.push(
+		'',
+		'## Copilot Prompt',
+		'',
+		'Analyze every capture in this folder as one related browser investigation. Correlate URL order, timestamps, entities, visible text, metadata, screenshots, risk, missing context, and next actions.',
+		''
+	);
 	return lines.join('\n');
 }
 

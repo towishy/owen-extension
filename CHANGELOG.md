@@ -4,6 +4,14 @@ All notable changes to the "owen-browser-bridge" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.3] - 2026-06-05
+
+- Added host and investigation-group capture folders for related multi-page investigations.
+- Added `_index.json` and `_summary.md` files inside each capture group folder.
+- Added `#readBrowserCaptureGroup` for reading and correlating all captures in a host or investigation group.
+- Added an optional browser popup field for investigation or case names.
+- Updated documentation for grouped capture analysis workflows.
+
 ## [0.1.2] - 2026-06-05
 
 - Added `Owen Browser Bridge: Open Setup Page` with buttons to start or stop the local server.

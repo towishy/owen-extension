@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -25,7 +25,8 @@
     "onCommand:owen-browser-bridge.copyPairingToken",
     "onCommand:owen-browser-bridge.regeneratePairingToken",
     "onLanguageModelTool:get_latest_browser_capture",
-    "onLanguageModelTool:read_browser_capture"
+    "onLanguageModelTool:read_browser_capture",
+    "onLanguageModelTool:read_browser_capture_group"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -102,6 +103,33 @@
             "idOrPath": {
               "type": "string",
               "description": "Capture id, Markdown path, or JSON path. If omitted, the latest capture is returned."
+            }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "read_browser_capture_group",
+        "displayName": "Read Browser Capture Group",
+        "userDescription": "Reads all browser captures in a host or investigation group.",
+        "modelDescription": "Use this tool when the user asks to analyze all captures for a host, domain, portal, incident, alert, investigation, or capture folder. It returns the group metadata, group summary Markdown, ordered capture Markdown/JSON payloads, and screenshot paths for correlation.",
+        "toolReferenceName": "readBrowserCaptureGroup",
+        "tags": [
+          "browser",
+          "capture",
+          "screenshot",
+          "security",
+          "defender",
+          "investigation"
+        ],
+        "icon": "$(folder-opened)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "group": {
+              "type": "string",
+              "description": "Host, host/group folder, workspace-relative folder, absolute folder, or omitted to read the latest capture group. Examples: security.microsoft.com, security.microsoft.com/incident-12345."
             }
           },
           "required": []

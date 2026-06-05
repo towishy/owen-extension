@@ -20,7 +20,7 @@ The initial target is Defender, Entra, Azure portal, and similar security invest
 - Optional HTML snapshot
 - Optional visible-tab PNG screenshot
 
-Captures are saved under `raw/browser-captures/YYYYMM/` by default as JSON, Markdown, and PNG files. That folder is ignored by git.
+Captures are saved under `raw/browser-captures/<host>/<group>/` by default as JSON, Markdown, and PNG files. Each group also gets `_index.json` and `_summary.md` so Copilot can analyze related multi-page investigations together. That folder is ignored by git.
 
 ## Install From GitHub
 
@@ -48,7 +48,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.1.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.3.vsix --force
 ```
 
 macOS terminal:
@@ -58,7 +58,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.1.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.3.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -111,8 +111,9 @@ If the token ever needs to be replaced, click **Regenerate and Copy Token** and 
 2. Click the **Owen Capture** browser extension icon.
 3. Confirm `VS Code Port` is `17321` unless you changed the VS Code setting.
 4. Paste the copied token into **Pairing Token**.
-5. Choose whether to include **screenshot** and **HTML snapshot**.
-6. Click **Save Settings**.
+5. Optionally enter an **Investigation / Case** name such as `incident-12345` to group multiple tab captures together.
+6. Choose whether to include **screenshot** and **HTML snapshot**.
+7. Click **Save Settings**.
 
 ### 4. Send a browser page to VS Code
 
@@ -122,7 +123,7 @@ If the token ever needs to be replaced, click **Regenerate and Copy Token** and 
 4. The popup should show `Sent`.
 5. In VS Code, run `Owen Browser Bridge: Show Latest Capture` to open the saved Markdown note.
 
-Captured files are stored in the folder shown under **Capture Directory** on the setup page. The default is `raw/browser-captures/YYYYMM/` under the current workspace.
+Captured files are stored in the folder shown under **Capture Directory** on the setup page. The default layout is `raw/browser-captures/<host>/<group>/` under the current workspace. If **Investigation / Case** is empty, the extension tries to infer an incident or alert id from the URL, then falls back to the capture date.
 
 ### If the command is not visible
 
@@ -144,6 +145,7 @@ The VS Code extension contributes two Language Model Tools:
 
 - `#getLatestBrowserCapture`: returns the latest received browser capture
 - `#readBrowserCapture`: returns a capture by id, Markdown path, or JSON path
+- `#readBrowserCaptureGroup`: returns every capture in a host or investigation group for correlation
 
 Example Copilot prompts:
 
@@ -154,6 +156,14 @@ Example Copilot prompts:
 ```text
 #readBrowserCapture capture-20260605T120000Z-a1b2c3 이 캡처의 보안 경고 타임라인을 재구성해줘.
 ```
+
+For multi-tab Defender or portal investigations:
+
+```text
+#readBrowserCaptureGroup security.microsoft.com/incident-12345 이 폴더의 모든 캡처를 하나의 인시던트 흐름으로 연관 분석해줘.
+```
+
+You can also omit the group to analyze the latest capture group, or pass only a host such as `security.microsoft.com` to read that host's newest group.
 
 Copilot can also read the generated Markdown/JSON/PNG files directly from the workspace.
 
