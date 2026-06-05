@@ -4,6 +4,11 @@ All notable changes to the "owen-browser-bridge" extension will be documented in
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.1.5] - 2026-06-05
+
+- Fixed browser-injected action and capture functions so page text, metadata, click-by-text, type, and wait-for-text work inside Chrome/Edge tab contexts.
+- Improved reliability of `#browserAct` evidence captures for Defender incident pages.
+
 ## [0.1.4] - 2026-06-05
 
 - Added paired browser command polling from the Chrome/Edge extension to VS Code.

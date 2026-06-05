@@ -197,15 +197,44 @@ async function createCapturePayload(tab, command, options) {
 
 function runDomCommand(command) {
   try {
+    const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+    const findByText = text => {
+      const needle = normalize(text).toLowerCase();
+      if (!needle) {
+        return undefined;
+      }
+
+      return Array.from(document.querySelectorAll('button,[role="button"],[role="tab"],a,input,textarea,select'))
+        .find(element => normalize(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || '').toLowerCase().includes(needle));
+    };
+
     if (command.action === 'readPage') {
       return { ok: true };
     }
 
     if (command.action === 'waitForText') {
-      return waitForText(command.text, command.timeoutMs);
+      const needle = normalize(command.text);
+      return new Promise(resolve => {
+        const deadline = Date.now() + (command.timeoutMs ?? 60000);
+        const check = () => {
+          const pageText = normalize(document.body?.innerText ?? '');
+          if (pageText.includes(needle)) {
+            resolve({ ok: true });
+            return;
+          }
+
+          if (Date.now() >= deadline) {
+            resolve({ error: `Text not found: ${command.text}` });
+            return;
+          }
+
+          setTimeout(check, 500);
+        };
+        check();
+      });
     }
 
-    const element = command.selector ? document.querySelector(command.selector) : findElementByText(command.text);
+    const element = command.selector ? document.querySelector(command.selector) : findByText(command.text);
     if (!element) {
       return { error: command.selector ? `Element not found: ${command.selector}` : `Element text not found: ${command.text}` };
     }
@@ -233,16 +262,6 @@ function runDomCommand(command) {
   } catch (error) {
     return { error: String(error?.message ?? error) };
   }
-}
-
-function findElementByText(text) {
-  const needle = normalizeText(text ?? '').toLowerCase();
-  if (!needle) {
-    return undefined;
-  }
-
-  return Array.from(document.querySelectorAll('button,[role="button"],[role="tab"],a,input,textarea,select'))
-    .find(element => normalizeText(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || '').toLowerCase().includes(needle));
 }
 
 function waitForTabComplete(tabId, timeoutMs) {
@@ -310,6 +329,7 @@ async function getOptions() {
 }
 
 function collectPageSnapshot(includeHtml) {
+  const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
   const metadata = {};
   for (const meta of document.querySelectorAll('meta[name], meta[property]')) {
     const key = meta.getAttribute('name') || meta.getAttribute('property');
@@ -321,19 +341,19 @@ function collectPageSnapshot(includeHtml) {
 
   const headings = Array.from(document.querySelectorAll('h1,h2,h3'))
     .slice(0, 50)
-    .map(element => ({ level: element.tagName.toLowerCase(), text: normalizeText(element.innerText) }))
+    .map(element => ({ level: element.tagName.toLowerCase(), text: normalize(element.innerText) }))
     .filter(item => item.text);
 
   const buttons = Array.from(document.querySelectorAll('button,[role="button"],a'))
     .slice(0, 120)
-    .map(element => normalizeText(element.innerText || element.getAttribute('aria-label') || element.getAttribute('title') || ''))
+    .map(element => normalize(element.innerText || element.getAttribute('aria-label') || element.getAttribute('title') || ''))
     .filter(Boolean);
 
   return {
     url: location.href,
     title: document.title,
-    visibleText: normalizeText(document.body?.innerText ?? '').slice(0, 200000),
-    selection: normalizeText(String(window.getSelection?.() ?? '')),
+    visibleText: normalize(document.body?.innerText ?? '').slice(0, 200000),
+    selection: normalize(String(window.getSelection?.() ?? '')),
     html: includeHtml ? document.documentElement.outerHTML.slice(0, 250000) : undefined,
     metadata: {
       lang: document.documentElement.lang || undefined,
@@ -352,26 +372,4 @@ function collectPageSnapshot(includeHtml) {
 
 function normalizeText(value) {
   return value.replace(/\s+/g, ' ').trim();
-}
-
-function waitForText(text, timeoutMs) {
-  const needle = normalizeText(text ?? '');
-  return new Promise(resolve => {
-    const deadline = Date.now() + (timeoutMs ?? 60000);
-    const check = () => {
-      const pageText = normalizeText(document.body?.innerText ?? '');
-      if (pageText.includes(needle)) {
-        resolve({ ok: true });
-        return;
-      }
-
-      if (Date.now() >= deadline) {
-        resolve({ error: `Text not found: ${text}` });
-        return;
-      }
-
-      setTimeout(check, 500);
-    };
-    check();
-  });
 }
