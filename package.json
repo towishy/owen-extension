@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -461,6 +461,26 @@
           "type": "string",
           "default": "raw/browser-captures",
           "description": "Workspace-relative folder where browser capture JSON, Markdown, and screenshots are stored."
+        },
+        "owenBrowserBridge.captureDirectoryByPlatform": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": { "type": "string" },
+          "properties": {
+            "win32": {
+              "type": "string",
+              "description": "Windows capture directory path. Example: C:\\OWEN\\Drive\\wiki_raw_articles\\browser-captures"
+            },
+            "darwin": {
+              "type": "string",
+              "description": "macOS capture directory path. Example: /Users/owen/work/wiki_raw_articles/browser-captures"
+            },
+            "linux": {
+              "type": "string",
+              "description": "Linux capture directory path."
+            }
+          },
+          "description": "Optional OS-specific capture directories. Keys use Node.js platform names such as win32, darwin, and linux. Aliases windows/win and mac/macos are also accepted. The matching platform path overrides owenBrowserBridge.captureDirectory."
         },
         "owenBrowserBridge.allowedHosts": {
           "type": "array",

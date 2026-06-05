@@ -1282,6 +1282,8 @@ async function openSetupPage(context: vscode.ExtensionContext) {
 				await removeAllowedHost(message.index);
 			} else if (command === 'updateCaptureDirectory') {
 				await updateCaptureDirectory(message.captureDirectory);
+			} else if (command === 'updatePlatformCaptureDirectories') {
+				await updatePlatformCaptureDirectories(message.windowsCaptureDirectory, message.macCaptureDirectory);
 			} else if (command === 'resetCaptureDirectory') {
 				await resetCaptureDirectory();
 			}
@@ -1298,6 +1300,8 @@ async function openSetupPage(context: vscode.ExtensionContext) {
 async function updateSetupPage(context: vscode.ExtensionContext, panel: vscode.WebviewPanel) {
 	const port = getConfig().get<number>('port', 17321);
 	const captureDirectorySetting = getConfig().get<string>('captureDirectory', 'raw/browser-captures');
+	const captureDirectoryByPlatform = getConfig().get<Record<string, string>>('captureDirectoryByPlatform', {});
+	const effectiveCaptureDirectorySetting = getConfiguredCaptureDirectory();
 	const captureDir = await getCaptureBaseDir(context);
 	const allowedHosts = getConfig().get<string[]>('allowedHosts', []);
 	const latest = context.globalState.get<StoredCapture>('latestCapture');
@@ -1305,13 +1309,17 @@ async function updateSetupPage(context: vscode.ExtensionContext, panel: vscode.W
 		isRunning: Boolean(server),
 		port,
 		captureDirectorySetting,
+		windowsCaptureDirectorySetting: getCaptureDirectorySettingForKeys(captureDirectoryByPlatform, ['win32', 'windows', 'win']) ?? '',
+		macCaptureDirectorySetting: getCaptureDirectorySettingForKeys(captureDirectoryByPlatform, ['darwin', 'mac', 'macos']) ?? '',
+		effectiveCaptureDirectorySetting,
+		platform: process.platform,
 		captureDir,
 		allowedHosts,
 		latest
 	});
 }
 
-function renderSetupPage(webview: vscode.Webview, state: { isRunning: boolean; port: number; captureDirectorySetting: string; captureDir: string; allowedHosts: string[]; latest?: StoredCapture }) {
+function renderSetupPage(webview: vscode.Webview, state: { isRunning: boolean; port: number; captureDirectorySetting: string; windowsCaptureDirectorySetting: string; macCaptureDirectorySetting: string; effectiveCaptureDirectorySetting: string; platform: NodeJS.Platform; captureDir: string; allowedHosts: string[]; latest?: StoredCapture }) {
 	const nonce = crypto.randomBytes(16).toString('base64url');
 	const statusClass = state.isRunning ? 'running' : 'stopped';
 	const statusText = state.isRunning ? `Running on 127.0.0.1:${state.port}` : 'Stopped';
@@ -1405,11 +1413,23 @@ function renderSetupPage(webview: vscode.Webview, state: { isRunning: boolean; p
 
 		<section class="card">
 			<strong>Capture Directory</strong>
-			<p>Set where JSON, Markdown, and PNG capture files are stored. Use a workspace-relative path or an absolute path.</p>
+			<p>Set where JSON, Markdown, and PNG capture files are stored. Windows and Mac directory paths are used first on their matching OS. The fallback path is used when no OS-specific path is set.</p>
+			<p class="meta">Fallback directory path</p>
 			<div class="add-host">
 				<input id="captureDirectory" aria-label="Capture directory" value="${escapeHtml(state.captureDirectorySetting)}" placeholder="raw/browser-captures or C:\\OWEN\\Drive\\wiki_raw_articles\\browser-captures">
 				<button data-command="updateCaptureDirectory">Save Directory</button>
 			</div>
+			<p class="meta">Windows directory path</p>
+			<div class="add-host">
+				<input id="windowsCaptureDirectory" aria-label="Windows capture directory" value="${escapeHtml(state.windowsCaptureDirectorySetting)}" placeholder="C:\\OWEN\\Drive\\wiki_raw_articles\\browser-captures">
+				<button data-command="updatePlatformCaptureDirectories">Save OS Directories</button>
+			</div>
+			<p class="meta">Mac directory path</p>
+			<div class="add-host">
+				<input id="macCaptureDirectory" aria-label="Mac capture directory" value="${escapeHtml(state.macCaptureDirectorySetting)}" placeholder="/Users/owen/work/wiki_raw_articles/browser-captures">
+				<button data-command="updatePlatformCaptureDirectories">Save OS Directories</button>
+			</div>
+			<p class="meta">Current platform: ${escapeHtml(state.platform)} · Effective setting: ${escapeHtml(state.effectiveCaptureDirectorySetting)}</p>
 			<p class="meta">Resolved folder: ${escapeHtml(state.captureDir)}</p>
 			<div class="actions">
 				<button class="secondary danger" data-command="resetCaptureDirectory">Reset to Default</button>
@@ -1447,6 +1467,14 @@ function renderSetupPage(webview: vscode.Webview, state: { isRunning: boolean; p
 				}
 				if (command === 'updateCaptureDirectory') {
 					vscode.postMessage({ command, captureDirectory: document.getElementById('captureDirectory').value });
+					return;
+				}
+				if (command === 'updatePlatformCaptureDirectories') {
+					vscode.postMessage({
+						command,
+						windowsCaptureDirectory: document.getElementById('windowsCaptureDirectory').value,
+						macCaptureDirectory: document.getElementById('macCaptureDirectory').value
+					});
 					return;
 				}
 				vscode.postMessage({ command });
@@ -1530,6 +1558,31 @@ async function updateCaptureDirectory(input: unknown) {
 	vscode.window.showInformationMessage(`Capture directory updated: ${captureDirectory}`);
 }
 
+async function updatePlatformCaptureDirectories(windowsInput: unknown, macInput: unknown) {
+	const current = getConfig().get<Record<string, string>>('captureDirectoryByPlatform', {});
+	const next = { ...current };
+	clearCaptureDirectoryKeys(next, ['win32', 'windows', 'win']);
+	clearCaptureDirectoryKeys(next, ['darwin', 'mac', 'macos']);
+
+	const windowsCaptureDirectory = typeof windowsInput === 'string' ? windowsInput.trim() : '';
+	const macCaptureDirectory = typeof macInput === 'string' ? macInput.trim() : '';
+	if (windowsCaptureDirectory) {
+		next.win32 = windowsCaptureDirectory;
+	}
+	if (macCaptureDirectory) {
+		next.darwin = macCaptureDirectory;
+	}
+
+	await getConfig().update('captureDirectoryByPlatform', next, vscode.ConfigurationTarget.Global);
+	vscode.window.showInformationMessage('OS-specific capture directories updated.');
+}
+
+function clearCaptureDirectoryKeys(values: Record<string, string>, keys: string[]) {
+	for (const key of keys) {
+		delete values[key];
+	}
+}
+
 async function resetCaptureDirectory() {
 	await getConfig().update('captureDirectory', undefined, vscode.ConfigurationTarget.Global);
 	vscode.window.showInformationMessage('Capture directory reset to the default setting.');
@@ -1607,13 +1660,60 @@ function readBody(request: http.IncomingMessage) {
 }
 
 async function getCaptureBaseDir(context: vscode.ExtensionContext) {
-	const configured = getConfig().get<string>('captureDirectory', 'raw/browser-captures');
+	const configured = getConfiguredCaptureDirectory();
 	const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 	if (workspaceFolder) {
 		return path.resolve(workspaceFolder, configured);
 	}
 
 	return path.join(context.globalStorageUri.fsPath, configured);
+}
+
+function getConfiguredCaptureDirectory() {
+	const platformDirectory = getPlatformCaptureDirectory(getConfig().get<Record<string, string>>('captureDirectoryByPlatform', {}));
+	return platformDirectory ?? getConfig().get<string>('captureDirectory', 'raw/browser-captures');
+}
+
+function getPlatformCaptureDirectory(values: Record<string, string> | undefined) {
+	if (!values || typeof values !== 'object') {
+		return undefined;
+	}
+
+	const aliases: Partial<Record<NodeJS.Platform, string[]>> = {
+		aix: ['aix'],
+		android: ['android'],
+		darwin: ['darwin', 'mac', 'macos'],
+		freebsd: ['freebsd'],
+		haiku: ['haiku'],
+		linux: ['linux'],
+		openbsd: ['openbsd'],
+		sunos: ['sunos'],
+		win32: ['win32', 'windows', 'win']
+	};
+
+	for (const key of aliases[process.platform] ?? [process.platform]) {
+		const value = values[key]?.trim();
+		if (value) {
+			return value;
+		}
+	}
+
+	return undefined;
+}
+
+function getCaptureDirectorySettingForKeys(values: Record<string, string> | undefined, keys: string[]) {
+	if (!values || typeof values !== 'object') {
+		return undefined;
+	}
+
+	for (const key of keys) {
+		const value = values[key]?.trim();
+		if (value) {
+			return value;
+		}
+	}
+
+	return undefined;
 }
 
 function parseUrl(value: string | undefined) {

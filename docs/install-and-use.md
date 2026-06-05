@@ -31,7 +31,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.8.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.9.vsix --force
 ```
 
 macOS terminal:
@@ -41,7 +41,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.8.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.9.vsix --force
 ```
 
 If `code` is unavailable, open VS Code and run `Shell Command: Install 'code' command in PATH`.
@@ -238,8 +238,19 @@ Use **Capture Directory** on `Owen Browser Bridge: Open Setup Page` to choose wh
 
 - Enter a workspace-relative path such as `raw/browser-captures`.
 - Enter an absolute path such as `C:\OWEN\Drive\wiki_raw_articles\browser-captures`.
+- Enter separate Windows and Mac directory paths when the same VS Code settings sync across multiple machines.
 - Click **Save Directory** to update `owenBrowserBridge.captureDirectory`.
+- Click **Save OS Directories** to update `owenBrowserBridge.captureDirectoryByPlatform.win32` and `owenBrowserBridge.captureDirectoryByPlatform.darwin`.
 - Click **Reset to Default** to delete the custom setting and return to `raw/browser-captures`.
+
+Settings JSON example:
+
+```json
+"owenBrowserBridge.captureDirectoryByPlatform": {
+  "win32": "C:\\OWEN\\Drive\\wiki_raw_articles\\browser-captures",
+  "darwin": "/Users/owen/work/wiki_raw_articles/browser-captures"
+}
+```
 
 ## Troubleshooting
 

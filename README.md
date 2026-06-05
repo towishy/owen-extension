@@ -11,7 +11,7 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
-## New in 0.1.8
+## New in 0.1.9
 
 - URL traversal capture with `journeyCapture` (visit URL lists and collect page-by-page evidence).
 - Pagination capture with `paginateCapture` (follow next page controls and collect multi-page summaries).
@@ -56,7 +56,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.8.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.9.vsix --force
 ```
 
 macOS terminal:
@@ -66,7 +66,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.8.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.9.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -258,6 +258,7 @@ When a `v*` tag is pushed to GitHub, `.github/workflows/release.yml` runs the sa
 
 - `owenBrowserBridge.port`: localhost port, default `17321`
 - `owenBrowserBridge.captureDirectory`: workspace-relative or absolute capture folder, default `raw/browser-captures`. You can edit or reset this from the setup page with **Capture Directory**.
+- `owenBrowserBridge.captureDirectoryByPlatform`: optional OS-specific capture folder map. Use `win32` for Windows and `darwin` for macOS; these override `captureDirectory` on the matching OS.
 - `owenBrowserBridge.allowedHosts`: accepted page hostnames. You can edit this from the setup page with **Allowed Hosts**.
 - `owenBrowserBridge.autoStart`: start the local server when VS Code starts
 

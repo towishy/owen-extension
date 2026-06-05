@@ -6,6 +6,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-06-05
+
+- Added OS-specific capture directory settings for Windows and macOS, including setup page fields for separate directory paths.
+
 ## [0.1.8] - 2026-06-05
 
 - Added 10 browser control actions for advanced investigations: `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, and `policyGuard`.
