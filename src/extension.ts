@@ -240,6 +240,10 @@ type BrowserAction =
 	| 'stableTargetProfile'
 	| 'guidedDrilldown'
 	| 'evidenceCompletenessCheck'
+	| 'failureExplainer'
+	| 'waitProfiler'
+	| 'automationHealthScore'
+	| 'sensitiveActionGuard'
 	| 'buildEvidencePack'
 	| 'buildNavigationGraph'
 	| 'assertPageContract'
@@ -733,7 +737,8 @@ const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
 	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
 	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'visualAssert', 'accessibilitySnapshot', 'mapForm',
-	'watchPageChanges', 'highlightEvidence', 'planAndRun', 'evidenceClaimCheck', 'tableWatchAndDiff', 'browserRunBundle', 'safeActionPreview', 'stableTargetProfile', 'guidedDrilldown', 'evidenceCompletenessCheck', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
+	'watchPageChanges', 'highlightEvidence', 'planAndRun', 'evidenceClaimCheck', 'tableWatchAndDiff', 'browserRunBundle', 'safeActionPreview', 'stableTargetProfile', 'guidedDrilldown', 'evidenceCompletenessCheck',
+	'failureExplainer', 'waitProfiler', 'automationHealthScore', 'sensitiveActionGuard', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
 	'captureReviewQueue', 'startBrowserJob', 'getBrowserJob', 'cancelBrowserJob', 'recordWorkflow', 'replayWorkflow',
 	'resumeAfterAuth', 'runWorkflow'
 ];
@@ -1103,6 +1108,10 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 
 	if (action === 'evidenceCompletenessCheck' && !step.captureGroup && !step.investigationName && (!Array.isArray(step.requiredClaims) || step.requiredClaims.length === 0)) {
 		throw new Error('browserAct evidenceCompletenessCheck requires captureGroup, investigationName, or requiredClaims.');
+	}
+
+	if (action === 'sensitiveActionGuard' && !step.actionTemplate?.action && !step.selector && !step.text && !step.label && !step.targetHint) {
+		throw new Error('browserAct sensitiveActionGuard requires actionTemplate.action, selector, text, label, or targetHint.');
 	}
 
 	if (action === 'buildEvidencePack' && !step.captureGroup && !step.investigationName) {

@@ -156,6 +156,10 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `stableTargetProfile` | Rank stable selector/accessibility candidates | `targetHint`, `selector`, `text`, `label` | New | `#browserAct { "action": "stableTargetProfile", "targetHint": "Evidence", "captureAfter": false }` |
 | `guidedDrilldown` | Open matching rows and collect detail text | `tableSelector`, `itemSelector`, `matchText`, `detailSelector` | New | `#browserAct { "action": "guidedDrilldown", "tableSelector": "#data-table", "matchText": "High", "detailSelector": "#details" }` |
 | `evidenceCompletenessCheck` | Check capture-group coverage for required claims | `captureGroup`, `requiredClaims` | New | `#browserAct { "action": "evidenceCompletenessCheck", "captureGroup": "case-001", "requiredClaims": ["severity"] }` |
+| `failureExplainer` | Explain the latest or selected failed run | `baseRunId`, `targetHint` | New | `#browserAct { "action": "failureExplainer", "captureAfter": false }` |
+| `waitProfiler` | Compare wait strategies on the current page | `waitCandidates`, `selector`, `semanticConditions` | New | `#browserAct { "action": "waitProfiler", "waitCandidates": ["spinnerGone", "elementStable"], "selector": "#data-table" }` |
+| `automationHealthScore` | Score current page readiness for automation | none | New | `#browserAct { "action": "automationHealthScore", "captureAfter": false }` |
+| `sensitiveActionGuard` | Block/warn before destructive actions | `actionTemplate`, `targetHint`, `onViolation` | New | `#browserAct { "action": "sensitiveActionGuard", "actionTemplate": { "action": "click", "targetHint": "Delete" } }` |
 | `waitPreset` | Wait for named portal readiness conditions | `waitPreset` | New | `#browserAct { "action": "waitPreset", "waitPreset": "genericPortalReady", "captureAfter": false }` |
 | `assertPageContract` | Verify expected page selectors/texts | `contractName`, `contractSelectors`, `contractTexts` | New | `#browserAct { "action": "assertPageContract", "contractSelectors": ["#data-table"], "contractTexts": ["READY_MARKER"] }` |
 | `buildEvidencePack` | Write capture-group evidence pack files | `captureGroup` | New | `#browserAct { "action": "buildEvidencePack", "captureGroup": "case-001", "captureAfter": false }` |
@@ -205,6 +209,7 @@ Use these inputs with `#browserAct` for higher reliability on modern web apps:
 | `claim` | Report statement checked by `evidenceClaimCheck` |
 | `requiredClaims` | Required claim/category list for `evidenceCompletenessCheck` |
 | `keyColumns` | Stable row-key columns for `tableWatchAndDiff` |
+| `waitCandidates` | Wait condition names profiled by `waitProfiler` |
 | `detailSelector` | Detail panel selector for `guidedDrilldown` |
 | `waitPreset` | Named readiness preset: `genericPortalReady`, `defenderIncidentReady`, `azureBladeReady`, `entraTableReady` |
 | `contractName` | Named contract for `assertPageContract` |
@@ -237,6 +242,10 @@ New actions:
 | `stableTargetProfile` | Score target candidates by selector strength, accessibility name, and interactability | `targetHint`, `selector`, `text`, `label` |
 | `guidedDrilldown` | Click matching table/list rows and collect detail panel evidence | `tableSelector`, `itemSelector`, `matchText`, `detailSelector` |
 | `evidenceCompletenessCheck` | Write `_evidence-completeness.md/json` when a capture group is available | `captureGroup`, `requiredClaims` |
+| `failureExplainer` | Classify recent failures and recommend retry or inspection actions | `baseRunId`, `targetHint` |
+| `waitProfiler` | Measure candidate wait conditions and recommend a readiness strategy | `waitCandidates`, `selector`, `semanticConditions` |
+| `automationHealthScore` | Score auth/loading/DOM stability/interactable/selector-memory readiness | none |
+| `sensitiveActionGuard` | Detect destructive action text and return pass/warn/block decision | `actionTemplate`, `onViolation` |
 | `waitPreset` | Run a named readiness wait and contract check | `waitPreset` |
 | `assertPageContract` | Check page selectors/texts or named portal contracts | `contractName`, `contractSelectors`, `contractTexts` |
 | `buildEvidencePack` | Assemble `_evidence-pack.md` and `_evidence-pack.json` in a capture group | `captureGroup` |
@@ -255,6 +264,8 @@ Use `waitPreset` before portal-specific evidence collection, then `assertPageCon
 Use `planAndRun` when the user gives a goal rather than exact selectors, but keep `captureAfter: false` until the generated steps are known to be useful. Use `evidenceClaimCheck` before writing final report claims. Use `tableWatchAndDiff` for portal grids that refresh in place, and `browserRunBundle` at handoff time after captures and evidence packs exist.
 
 Use `safeActionPreview` before destructive or ambiguous clicks, then `stableTargetProfile` when a target needs a durable selector. Use `guidedDrilldown` for table-to-detail workflows. Run `evidenceCompletenessCheck` before final handoff to identify missing report claims.
+
+Use `automationHealthScore` before long workflows, `waitProfiler` when portal readiness is flaky, `sensitiveActionGuard` before any action with delete/remove/disable/approve-like language, and `failureExplainer` immediately after a failed action before changing selectors.
 
 Semantic expressions for `semanticWait` or `wait.kind=semantic`:
 

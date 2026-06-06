@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-06-06
+
+- Added `failureExplainer` to classify recent browser automation failures and suggest recovery actions.
+- Added `waitProfiler` to compare page readiness wait strategies.
+- Added `automationHealthScore` to score auth, loading, DOM stability, target, and selector-memory readiness.
+- Added `sensitiveActionGuard` to pass, warn, or block potentially destructive actions.
+
 ## [0.1.21] - 2026-06-06
 
 - Added `safeActionPreview` to preview target and confirmation risk before acting.

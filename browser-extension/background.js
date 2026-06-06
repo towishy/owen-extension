@@ -11,6 +11,7 @@ let pollInProgress = false;
 let lastReplayScript;
 const stateCheckpoints = new Map();
 const executionRunHistory = new Map();
+const recentCommandFailures = new Map();
 const BROWSER_SESSION_STORAGE_KEY = 'owenBrowserSessionId';
 const LATEST_BROWSER_STATE_STORAGE_KEY = 'owenLatestBrowserState';
 const WORKFLOW_MACROS_STORAGE_KEY = 'owenWorkflowMacros';
@@ -155,6 +156,7 @@ async function executeBrowserCommand(command, options) {
     return response;
   } catch (error) {
     const message = String(error?.message ?? error);
+    rememberCommandFailure(command, message);
     const authPrefix = 'AUTH_REQUIRED::';
     if (message.startsWith(authPrefix)) {
       const payloadText = message.slice(authPrefix.length);
@@ -316,6 +318,22 @@ async function executeSingleAction(command, allowedHosts) {
 
   if (action === 'evidenceCompletenessCheck') {
     return runEvidenceCompletenessCheck(command, allowedHosts);
+  }
+
+  if (action === 'failureExplainer') {
+    return runFailureExplainer(command, allowedHosts);
+  }
+
+  if (action === 'waitProfiler') {
+    return runWaitProfiler(command, allowedHosts);
+  }
+
+  if (action === 'automationHealthScore') {
+    return runAutomationHealthScore(command, allowedHosts);
+  }
+
+  if (action === 'sensitiveActionGuard') {
+    return runSensitiveActionGuard(command, allowedHosts);
   }
 
   if (action === 'buildEvidencePack') {
@@ -1874,6 +1892,210 @@ async function runEvidenceCompletenessCheck(command, allowedHosts) {
     url: tab.url,
     title: tab.title,
     message: 'Capture-group completeness files are assembled by the VS Code extension when a capture group is available.'
+  };
+}
+
+function rememberCommandFailure(command, message) {
+  if (!command?.id) {
+    return;
+  }
+  recentCommandFailures.set(command.id, {
+    runId: command.id,
+    action: command.action,
+    createdAt: new Date().toISOString(),
+    error: message,
+    selector: command.selector,
+    text: command.text,
+    label: command.label,
+    targetHint: command.targetHint,
+    url: command.url
+  });
+  if (recentCommandFailures.size > 50) {
+    const oldest = recentCommandFailures.keys().next().value;
+    if (oldest) {
+      recentCommandFailures.delete(oldest);
+    }
+  }
+}
+
+async function runFailureExplainer(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const requestedRunId = command.baseRunId || command.newRunId || command.value;
+  const failedRun = requestedRunId
+    ? recentCommandFailures.get(requestedRunId)
+    : Array.from(recentCommandFailures.values()).slice(-1)[0];
+  const historicalRun = requestedRunId ? executionRunHistory.get(requestedRunId) : Array.from(executionRunHistory.values()).reverse().find(run => Array.isArray(run.steps) && run.steps.some(step => step?.result?.ok === false || step?.result?.error));
+  const source = failedRun || historicalRun;
+  const errorText = String(failedRun?.error || historicalRun?.steps?.find(step => step?.result?.ok === false || step?.result?.error)?.result?.error || 'No recent failed browser command was found.');
+  const lowered = errorText.toLowerCase();
+  const findings = [];
+  if (/selector|not found|no element|invalid selector/.test(lowered)) {
+    findings.push({ kind: 'target-not-found', detail: 'The requested selector or target did not resolve to a usable element.' });
+  }
+  if (/hidden|visible|visibility|display|disabled|overlap/.test(lowered)) {
+    findings.push({ kind: 'target-not-actionable', detail: 'The target may be hidden, disabled, outside the viewport, or overlapped.' });
+  }
+  if (/timeout|timed out/.test(lowered)) {
+    findings.push({ kind: 'timeout', detail: 'The page did not reach the expected state before the timeout.' });
+  }
+  if (/auth_required|sign in|signin|login|unauthorized/.test(lowered)) {
+    findings.push({ kind: 'auth-or-authorization', detail: 'The browser may need sign-in or pairing/host authorization.' });
+  }
+  if (/iframe|frame|shadow/.test(lowered)) {
+    findings.push({ kind: 'deep-targeting', detail: 'The target may be inside an iframe or shadow root.' });
+  }
+  if (findings.length === 0) {
+    findings.push({ kind: 'unknown', detail: 'No known failure pattern matched. Inspect current targets before retrying.' });
+  }
+
+  let targetInspection;
+  if (source?.selector || source?.text || source?.label || source?.targetHint || command.selector || command.text || command.label || command.targetHint) {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: inspectTargetsOnPage,
+      args: [buildTargetIntent({ ...command, ...source })]
+    });
+    targetInspection = result;
+  }
+
+  const recommendations = [];
+  if (findings.some(item => item.kind === 'target-not-found' || item.kind === 'deep-targeting')) {
+    recommendations.push('Run inspectTargets or stableTargetProfile with targetScope=allFrames and a targetHint.');
+  }
+  if (findings.some(item => item.kind === 'timeout')) {
+    recommendations.push('Run waitProfiler, then retry with the recommended wait kind or waitPreset.');
+  }
+  if (findings.some(item => item.kind === 'target-not-actionable')) {
+    recommendations.push('Use safeActionPreview before retrying, then scroll or wait for the target to become actionable.');
+  }
+  return { ok: true, generatedAt: new Date().toISOString(), runId: source?.runId, action: source?.action, error: errorText, findings, recommendations, targetInspection };
+}
+
+async function runWaitProfiler(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const candidates = Array.isArray(command.waitCandidates) && command.waitCandidates.length > 0
+    ? command.waitCandidates.slice(0, 8)
+    : ['spinnerGone', 'elementStable', 'urlSettled', 'networkIdle'];
+  const profiles = [];
+  for (const candidate of candidates) {
+    const wait = waitConditionFromCandidate(candidate, command);
+    const started = Date.now();
+    let result;
+    try {
+      const [{ result: waitResult }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: runDomCommand,
+        args: [{ ...command, action: 'wait', wait, timeoutMs: Math.min(Number(command.timeoutMs) || 5000, 10000) }]
+      });
+      result = waitResult;
+    } catch (error) {
+      result = { ok: false, error: String(error?.message || error) };
+    }
+    const elapsedMs = Date.now() - started;
+    profiles.push({ candidate, wait, ok: result?.ok !== false && !result?.error, elapsedMs, result });
+  }
+  const successful = profiles.filter(profile => profile.ok).sort((a, b) => a.elapsedMs - b.elapsedMs);
+  const recommended = successful.find(profile => profile.elapsedMs >= 150) || successful[0] || profiles[0];
+  return { ok: true, generatedAt: new Date().toISOString(), url: tab.url, title: tab.title, recommended, profiles };
+}
+
+function waitConditionFromCandidate(candidate, command) {
+  const key = String(candidate || '').trim();
+  if (key === 'semantic') {
+    return { kind: 'semantic', semanticConditions: command.semanticConditions || [] };
+  }
+  if (key === 'networkIdle') {
+    return { kind: 'networkIdle', idleMs: 800, maxInflight: 0 };
+  }
+  if (key === 'elementStable') {
+    return { kind: 'elementStable', selector: command.selector || command.assertSelector || 'body' };
+  }
+  if (key === 'urlSettled') {
+    return { kind: 'urlSettled' };
+  }
+  if (key === 'text') {
+    return { kind: 'text', text: command.text || command.assertText || '' };
+  }
+  if (key === 'element') {
+    return { kind: 'element', selector: command.selector || command.assertSelector || 'body' };
+  }
+  return { kind: key || 'spinnerGone', selector: command.selector || command.assertSelector };
+}
+
+async function runAutomationHealthScore(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const [{ result: page }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const text = normalize(document.body?.innerText || '');
+      const busyCount = document.querySelectorAll('[aria-busy="true"],[role="progressbar"],.spinner,.loading').length;
+      const interactableCount = document.querySelectorAll('button,a,input,textarea,select,[role="button"],[role="tab"],[tabindex]').length;
+      const tableCount = document.querySelectorAll('table,[role="table"],[role="grid"]').length;
+      const formFieldCount = document.querySelectorAll('input,textarea,select').length;
+      return {
+        textLength: text.length,
+        authLikely: Boolean(document.querySelector('input[type="password"]')) || /sign in|signin|login|로그인|인증/i.test(text.slice(0, 3000)),
+        busyCount,
+        interactableCount,
+        tableCount,
+        formFieldCount,
+        headings: document.querySelectorAll('h1,h2,h3').length,
+        url: location.href,
+        title: document.title
+      };
+    }
+  });
+  const fingerprintA = await collectDomFingerprint(tab.id);
+  await new Promise(resolve => setTimeout(resolve, 500));
+  const fingerprintB = await collectDomFingerprint(tab.id);
+  const stored = await chrome.storage.local.get(SELECTOR_MEMORY_STORAGE_KEY);
+  const memory = stored[SELECTOR_MEMORY_STORAGE_KEY] && typeof stored[SELECTOR_MEMORY_STORAGE_KEY] === 'object' ? stored[SELECTOR_MEMORY_STORAGE_KEY] : {};
+  const selectorMemoryEntries = Object.values(memory).reduce((count, value) => count + (Array.isArray(value) ? value.length : 0), 0);
+  const risks = [];
+  let score = 100;
+  if (page?.authLikely) { score -= 30; risks.push('auth-likely'); }
+  if ((page?.busyCount || 0) > 0) { score -= 15; risks.push('busy-indicators-visible'); }
+  if (fingerprintA.hash !== fingerprintB.hash) { score -= 15; risks.push('dom-still-changing'); }
+  if ((page?.interactableCount || 0) === 0) { score -= 20; risks.push('no-interactables-detected'); }
+  if ((page?.textLength || 0) < 100) { score -= 10; risks.push('low-visible-text'); }
+  if (selectorMemoryEntries === 0) { score -= 5; risks.push('no-selector-memory'); }
+  score = Math.max(0, Math.min(100, score));
+  const level = score >= 80 ? 'good' : score >= 55 ? 'fair' : 'poor';
+  const recommendedNextAction = risks.includes('dom-still-changing') || risks.includes('busy-indicators-visible') ? 'waitProfiler' : risks.includes('no-selector-memory') ? 'stableTargetProfile' : 'safeActionPreview';
+  return { ok: true, generatedAt: new Date().toISOString(), score, level, risks, recommendedNextAction, page, domStability: { before: fingerprintA, after: fingerprintB, stable: fingerprintA.hash === fingerprintB.hash }, selectorMemoryEntries };
+}
+
+async function runSensitiveActionGuard(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const actionTemplate = command.actionTemplate && typeof command.actionTemplate === 'object' ? command.actionTemplate : {};
+  const guardedCommand = { ...command, ...actionTemplate, action: actionTemplate.action || command.action };
+  const [{ result: inspection }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: inspectTargetsOnPage,
+    args: [buildTargetIntent(guardedCommand)]
+  });
+  const target = Array.isArray(inspection?.rankedTargets) ? inspection.rankedTargets[0] : undefined;
+  const text = [guardedCommand.action, guardedCommand.text, guardedCommand.label, guardedCommand.targetHint, target?.text, target?.accessibleName].filter(Boolean).join(' ');
+  const sensitivePattern = /delete|remove|disable|block|revoke|reset|submit|approve|confirm|quarantine|isolate|삭제|제거|차단|초기화|승인|격리|제출/i;
+  const sensitive = sensitivePattern.test(text);
+  const destructiveActions = new Set(['closeTab', 'safeDownloadAndHash', 'bulkActionFromList', 'rollbackToCheckpoint']);
+  const reasons = [sensitive ? 'sensitive-target-text' : undefined, destructiveActions.has(guardedCommand.action) ? 'destructive-action' : undefined].filter(Boolean);
+  const decision = reasons.length === 0 ? 'pass' : command.onViolation === 'warn' ? 'warn' : 'block';
+  return {
+    ok: true,
+    decision,
+    requiresConfirmation: decision !== 'pass',
+    confirmationKeyword: decision !== 'pass' ? 'CONFIRM_BROWSER_ACTION' : undefined,
+    action: guardedCommand.action,
+    reasons,
+    target,
+    candidates: Array.isArray(inspection?.rankedTargets) ? inspection.rankedTargets.slice(0, 5) : [],
+    saferAlternative: decision !== 'pass' ? { action: 'readPage', captureAfter: false } : undefined
   };
 }
 

@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -174,7 +174,7 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "waitPreset", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "visualAssert", "accessibilitySnapshot", "mapForm", "watchPageChanges", "highlightEvidence", "planAndRun", "evidenceClaimCheck", "tableWatchAndDiff", "browserRunBundle", "safeActionPreview", "stableTargetProfile", "guidedDrilldown", "evidenceCompletenessCheck", "buildEvidencePack", "buildNavigationGraph", "assertPageContract", "createHandoff", "selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "replayWorkflow", "resumeAfterAuth", "runWorkflow"],
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "waitPreset", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "visualAssert", "accessibilitySnapshot", "mapForm", "watchPageChanges", "highlightEvidence", "planAndRun", "evidenceClaimCheck", "tableWatchAndDiff", "browserRunBundle", "safeActionPreview", "stableTargetProfile", "guidedDrilldown", "evidenceCompletenessCheck", "failureExplainer", "waitProfiler", "automationHealthScore", "sensitiveActionGuard", "buildEvidencePack", "buildNavigationGraph", "assertPageContract", "createHandoff", "selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "replayWorkflow", "resumeAfterAuth", "runWorkflow"],
               "description": "Browser action to run. Defaults to readPage."
             },
             "selector": {
@@ -400,6 +400,11 @@
               "type": "array",
               "items": { "type": "string" },
               "description": "Column names used as stable row keys for tableWatchAndDiff."
+            },
+            "waitCandidates": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Wait condition names to profile for waitProfiler."
             },
             "detailSelector": {
               "type": "string",
