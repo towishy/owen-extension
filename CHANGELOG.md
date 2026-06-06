@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-06-06
+
+- Added `tabOrchestrator` to classify, return to, and optionally clean up browser tabs by logical role.
+- Added `popupGuard` to warn or block on unexpected, auth, permission, and security-warning tabs.
+- Added `returnToTab` to reactivate a tab by logical role or tab index.
+- Added `tabRunSummary` to summarize current-window tabs, roles, signals, and recommended next action.
+
 ## [0.1.22] - 2026-06-06
 
 - Added `failureExplainer` to classify recent browser automation failures and suggest recovery actions.

@@ -160,6 +160,10 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `waitProfiler` | Compare wait strategies on the current page | `waitCandidates`, `selector`, `semanticConditions` | New | `#browserAct { "action": "waitProfiler", "waitCandidates": ["spinnerGone", "elementStable"], "selector": "#data-table" }` |
 | `automationHealthScore` | Score current page readiness for automation | none | New | `#browserAct { "action": "automationHealthScore", "captureAfter": false }` |
 | `sensitiveActionGuard` | Block/warn before destructive actions | `actionTemplate`, `targetHint`, `onViolation` | New | `#browserAct { "action": "sensitiveActionGuard", "actionTemplate": { "action": "click", "targetHint": "Delete" } }` |
+| `tabOrchestrator` | Classify tabs by role, flag unexpected tabs, and optionally return/clean up | `tabRoles`, `expectedTabs`, `returnToRole`, `onUnexpectedTab` | New | `#browserAct { "action": "tabOrchestrator", "tabRoles": { "main": ["admin.microsoft.com"], "auth": ["login"] }, "expectedTabs": 2, "returnToRole": "main" }` |
+| `popupGuard` | Warn or block on unexpected/auth/permission/security tabs | `expectedTabs`, `onUnexpectedTab`, `tabRoles` | New | `#browserAct { "action": "popupGuard", "expectedTabs": 1, "onUnexpectedTab": "warn", "captureAfter": false }` |
+| `returnToTab` | Reactivate a tab by logical role or tab index | `returnToRole`, `targetTabIndex`, `tabRoles` | New | `#browserAct { "action": "returnToTab", "returnToRole": "main", "tabRoles": { "main": ["admin.microsoft.com"] } }` |
+| `tabRunSummary` | Summarize current-window tab roles, signals, and next action | `tabRoles`, `expectedTabs` | New | `#browserAct { "action": "tabRunSummary", "captureAfter": false }` |
 | `waitPreset` | Wait for named portal readiness conditions | `waitPreset` | New | `#browserAct { "action": "waitPreset", "waitPreset": "genericPortalReady", "captureAfter": false }` |
 | `assertPageContract` | Verify expected page selectors/texts | `contractName`, `contractSelectors`, `contractTexts` | New | `#browserAct { "action": "assertPageContract", "contractSelectors": ["#data-table"], "contractTexts": ["READY_MARKER"] }` |
 | `buildEvidencePack` | Write capture-group evidence pack files | `captureGroup` | New | `#browserAct { "action": "buildEvidencePack", "captureGroup": "case-001", "captureAfter": false }` |
@@ -217,6 +221,11 @@ Use these inputs with `#browserAct` for higher reliability on modern web apps:
 | `contractTexts` | Text snippets that must be present |
 | `captureGroup` | Group or host/group path for evidence pack generation |
 | `jobName` | Stored browser job identifier |
+| `tabRoles` | Role-to-URL/title substring map for tab orchestration |
+| `expectedTabs` | Expected current-window tab count for popup detection |
+| `returnToRole` | Logical role to reactivate with `returnToTab` or `tabOrchestrator` |
+| `closeExtraTabs` | Close unexpected inactive tabs; requires `confirmDangerous: true` |
+| `onUnexpectedTab` | Handling mode: `capture`, `warn`, or `block` |
 
 Use `visualAssert` after click/type/navigation steps when the important question is whether the UI actually reached the expected state. Prefer `assertText` plus `assertSelector` for portal pages where a click can succeed without changing the active blade or table.
 
@@ -246,6 +255,10 @@ New actions:
 | `waitProfiler` | Measure candidate wait conditions and recommend a readiness strategy | `waitCandidates`, `selector`, `semanticConditions` |
 | `automationHealthScore` | Score auth/loading/DOM stability/interactable/selector-memory readiness | none |
 | `sensitiveActionGuard` | Detect destructive action text and return pass/warn/block decision | `actionTemplate`, `onViolation` |
+| `tabOrchestrator` | Classify tabs by logical role and return to the right work tab | `tabRoles`, `expectedTabs`, `returnToRole` |
+| `popupGuard` | Warn/block when unexpected, auth, permission, or security tabs appear | `expectedTabs`, `onUnexpectedTab` |
+| `returnToTab` | Reactivate the requested role or tab index | `returnToRole`, `targetTabIndex` |
+| `tabRunSummary` | Return role counts, signals, unexpected tabs, and next action | `tabRoles`, `expectedTabs` |
 | `waitPreset` | Run a named readiness wait and contract check | `waitPreset` |
 | `assertPageContract` | Check page selectors/texts or named portal contracts | `contractName`, `contractSelectors`, `contractTexts` |
 | `buildEvidencePack` | Assemble `_evidence-pack.md` and `_evidence-pack.json` in a capture group | `captureGroup` |
@@ -265,7 +278,7 @@ Use `planAndRun` when the user gives a goal rather than exact selectors, but kee
 
 Use `safeActionPreview` before destructive or ambiguous clicks, then `stableTargetProfile` when a target needs a durable selector. Use `guidedDrilldown` for table-to-detail workflows. Run `evidenceCompletenessCheck` before final handoff to identify missing report claims.
 
-Use `automationHealthScore` before long workflows, `waitProfiler` when portal readiness is flaky, `sensitiveActionGuard` before any action with delete/remove/disable/approve-like language, and `failureExplainer` immediately after a failed action before changing selectors.
+Use `automationHealthScore` before long workflows, `waitProfiler` when portal readiness is flaky, `sensitiveActionGuard` before any action with delete/remove/disable/approve-like language, and `failureExplainer` immediately after a failed action before changing selectors. Use `tabRunSummary`, `tabOrchestrator`, `popupGuard`, and `returnToTab` around OAuth, download, multi-portal, or popup-heavy workflows.
 
 Semantic expressions for `semanticWait` or `wait.kind=semantic`:
 

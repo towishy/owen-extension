@@ -14,7 +14,7 @@ Use this section for a different Windows PC or a Mac.
 1. Open <https://github.com/towishy/owen-extension/releases>.
 2. Download both release assets:
   - `owen-browser-bridge-*.vsix`
-  - `owen-browser-capture-browser-extension-*.zip`
+code --install-extension .\owen-browser-bridge-0.1.23.vsix --force
 3. In VS Code, press `Ctrl+Shift+P` on Windows/Linux or `Cmd+Shift+P` on macOS.
 4. Run `Extensions: Install from VSIX...`.
 5. Select the downloaded `.vsix` file.
@@ -24,14 +24,12 @@ Use this section for a different Windows PC or a Mac.
 
 ### Build and install from source
 
-Windows PowerShell:
-
 ```powershell
 git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-extension
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.14.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.23.vsix --force
 ```
 
 macOS terminal:
@@ -41,15 +39,12 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.12.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.23.vsix --force
 ```
 
 If `code` is unavailable, open VS Code and run `Shell Command: Install 'code' command in PATH`.
 
 ### Install the browser extension from release ZIP or cloned repo
-
-The browser extension is not installed by the VSIX. Load it from the extracted release ZIP or the cloned repository.
-
 Microsoft Edge:
 
 1. Open `edge://extensions`.
@@ -180,9 +175,9 @@ For paired browser control:
 
 `#browserAct` supports `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, text sample, and capture quality. Actions are delivered through the paired browser extension, limited to **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are available for richer automation: `wait`, `waitPreset`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `visualAssert`, `accessibilitySnapshot`, `mapForm`, `watchPageChanges`, `highlightEvidence`, `planAndRun`, `evidenceClaimCheck`, `tableWatchAndDiff`, `browserRunBundle`, `safeActionPreview`, `stableTargetProfile`, `guidedDrilldown`, `evidenceCompletenessCheck`, `failureExplainer`, `waitProfiler`, `automationHealthScore`, `sensitiveActionGuard`, `buildEvidencePack`, `buildNavigationGraph`, `assertPageContract`, `createHandoff`, `selectorHealthReport`, `captureReviewQueue`, `startBrowserJob`, `getBrowserJob`, `cancelBrowserJob`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are available for richer automation: `wait`, `waitPreset`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `visualAssert`, `accessibilitySnapshot`, `mapForm`, `watchPageChanges`, `highlightEvidence`, `planAndRun`, `evidenceClaimCheck`, `tableWatchAndDiff`, `browserRunBundle`, `safeActionPreview`, `stableTargetProfile`, `guidedDrilldown`, `evidenceCompletenessCheck`, `failureExplainer`, `waitProfiler`, `automationHealthScore`, `sensitiveActionGuard`, `tabOrchestrator`, `popupGuard`, `returnToTab`, `tabRunSummary`, `buildEvidencePack`, `buildNavigationGraph`, `assertPageContract`, `createHandoff`, `selectorHealthReport`, `captureReviewQueue`, `startBrowserJob`, `getBrowserJob`, `cancelBrowserJob`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` also supports resilient workflow and traversal inputs: `preset`, `steps`, `goal`, `claim`, `requiredClaims`, `retries`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `targetHint`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `nextSelector`, `nextText`, `extractSelectors`, `urlIncludes`, `tableSelector`, `keyColumns`, `waitCandidates`, `detailSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, `policyProfile`, `waitPreset`, `contractName`, `contractSelectors`, `contractTexts`, `captureGroup`, and `jobName`.
+`#browserAct` also supports resilient workflow and traversal inputs: `preset`, `steps`, `goal`, `claim`, `requiredClaims`, `retries`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `targetHint`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `nextSelector`, `nextText`, `extractSelectors`, `urlIncludes`, `tableSelector`, `keyColumns`, `waitCandidates`, `detailSelector`, `tabRoles`, `expectedTabs`, `returnToRole`, `closeExtraTabs`, `onUnexpectedTab`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, `policyProfile`, `waitPreset`, `contractName`, `contractSelectors`, `contractTexts`, `captureGroup`, and `jobName`.
 
 Partial evidence capture examples:
 
@@ -307,7 +302,7 @@ Use `planAndRun` when the operator gives a goal instead of exact steps, `evidenc
 
 Use `safeActionPreview` and `stableTargetProfile` before uncertain clicks. Use `guidedDrilldown` to open matching table/list rows and collect detail panel text. Use `evidenceCompletenessCheck` to create `_evidence-completeness.md/json` under a capture group before final report handoff.
 
-Use `automationHealthScore` before long automation runs, `waitProfiler` when readiness is flaky, `sensitiveActionGuard` before destructive labels, and `failureExplainer` immediately after a failed run.
+Use `automationHealthScore` before long automation runs, `waitProfiler` when readiness is flaky, `sensitiveActionGuard` before destructive labels, and `failureExplainer` immediately after a failed run. Use `tabRunSummary` and `tabOrchestrator` before OAuth, download, or admin-portal flows that may open extra tabs, and `popupGuard` when an unexpected tab should pause automation.
 
 ### Configure capture redaction
 

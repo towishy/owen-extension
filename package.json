@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -174,7 +174,7 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "waitPreset", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "visualAssert", "accessibilitySnapshot", "mapForm", "watchPageChanges", "highlightEvidence", "planAndRun", "evidenceClaimCheck", "tableWatchAndDiff", "browserRunBundle", "safeActionPreview", "stableTargetProfile", "guidedDrilldown", "evidenceCompletenessCheck", "failureExplainer", "waitProfiler", "automationHealthScore", "sensitiveActionGuard", "buildEvidencePack", "buildNavigationGraph", "assertPageContract", "createHandoff", "selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "replayWorkflow", "resumeAfterAuth", "runWorkflow"],
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "waitPreset", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "visualAssert", "accessibilitySnapshot", "mapForm", "watchPageChanges", "highlightEvidence", "planAndRun", "evidenceClaimCheck", "tableWatchAndDiff", "browserRunBundle", "safeActionPreview", "stableTargetProfile", "guidedDrilldown", "evidenceCompletenessCheck", "failureExplainer", "waitProfiler", "automationHealthScore", "sensitiveActionGuard", "tabOrchestrator", "popupGuard", "returnToTab", "tabRunSummary", "buildEvidencePack", "buildNavigationGraph", "assertPageContract", "createHandoff", "selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "replayWorkflow", "resumeAfterAuth", "runWorkflow"],
               "description": "Browser action to run. Defaults to readPage."
             },
             "selector": {
@@ -436,6 +436,31 @@
             "jobName": {
               "type": "string",
               "description": "Browser job name for startBrowserJob, getBrowserJob, and cancelBrowserJob."
+            },
+            "tabRoles": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "description": "Role-to-URL/title substring map for tabOrchestrator, popupGuard, returnToTab, and tabRunSummary."
+            },
+            "expectedTabs": {
+              "type": "number",
+              "description": "Expected tab count for popup and unexpected-tab detection. Clamped to 1-50."
+            },
+            "returnToRole": {
+              "type": "string",
+              "description": "Logical tab role to activate for returnToTab or after tabOrchestrator."
+            },
+            "closeExtraTabs": {
+              "type": "boolean",
+              "description": "When true, tabOrchestrator closes unexpected inactive tabs. Requires confirmDangerous=true."
+            },
+            "onUnexpectedTab": {
+              "type": "string",
+              "enum": ["capture", "warn", "block"],
+              "description": "How tabOrchestrator and popupGuard handle unexpected tabs."
             },
             "regionX": {
               "type": "number",

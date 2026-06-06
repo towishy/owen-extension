@@ -172,6 +172,7 @@ type BrowserStepInput = {
 	claim?: string;
 	requiredClaims?: string[];
 	keyColumns?: string[];
+	waitCandidates?: string[];
 	detailSelector?: string;
 	waitPreset?: 'defenderIncidentReady' | 'azureBladeReady' | 'entraTableReady' | 'genericPortalReady';
 	contractName?: string;
@@ -179,6 +180,11 @@ type BrowserStepInput = {
 	contractTexts?: string[];
 	captureGroup?: string;
 	jobName?: string;
+	tabRoles?: Record<string, string[]>;
+	expectedTabs?: number;
+	returnToRole?: string;
+	closeExtraTabs?: boolean;
+	onUnexpectedTab?: 'capture' | 'warn' | 'block';
 };
 
 type BrowserPreset = 'defenderIncidentSurvey' | 'defenderIncidentAlerts' | 'defenderIncidentEvidence';
@@ -244,6 +250,10 @@ type BrowserAction =
 	| 'waitProfiler'
 	| 'automationHealthScore'
 	| 'sensitiveActionGuard'
+	| 'tabOrchestrator'
+	| 'popupGuard'
+	| 'returnToTab'
+	| 'tabRunSummary'
 	| 'buildEvidencePack'
 	| 'buildNavigationGraph'
 	| 'assertPageContract'
@@ -350,6 +360,7 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	claim?: string;
 	requiredClaims: string[];
 	keyColumns: string[];
+	waitCandidates: string[];
 	detailSelector?: string;
 	waitPreset?: 'defenderIncidentReady' | 'azureBladeReady' | 'entraTableReady' | 'genericPortalReady';
 	contractName?: string;
@@ -357,6 +368,11 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	contractTexts: string[];
 	captureGroup?: string;
 	jobName?: string;
+	tabRoles: Record<string, string[]>;
+	expectedTabs?: number;
+	returnToRole?: string;
+	closeExtraTabs: boolean;
+	onUnexpectedTab: 'capture' | 'warn' | 'block';
 	investigationName?: string;
 	allowedHosts: string[];
 };
@@ -738,7 +754,7 @@ const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
 	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'visualAssert', 'accessibilitySnapshot', 'mapForm',
 	'watchPageChanges', 'highlightEvidence', 'planAndRun', 'evidenceClaimCheck', 'tableWatchAndDiff', 'browserRunBundle', 'safeActionPreview', 'stableTargetProfile', 'guidedDrilldown', 'evidenceCompletenessCheck',
-	'failureExplainer', 'waitProfiler', 'automationHealthScore', 'sensitiveActionGuard', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
+	'failureExplainer', 'waitProfiler', 'automationHealthScore', 'sensitiveActionGuard', 'tabOrchestrator', 'popupGuard', 'returnToTab', 'tabRunSummary', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
 	'captureReviewQueue', 'startBrowserJob', 'getBrowserJob', 'cancelBrowserJob', 'recordWorkflow', 'replayWorkflow',
 	'resumeAfterAuth', 'runWorkflow'
 ];
@@ -865,6 +881,7 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		claim: input.claim,
 		requiredClaims: sanitizeStringList(input.requiredClaims),
 		keyColumns: sanitizeStringList(input.keyColumns),
+		waitCandidates: sanitizeStringList(input.waitCandidates),
 		detailSelector: input.detailSelector,
 		waitPreset: input.waitPreset,
 		contractName: input.contractName,
@@ -872,6 +889,11 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		contractTexts: sanitizeStringList(input.contractTexts),
 		captureGroup: input.captureGroup,
 		jobName: input.jobName,
+		tabRoles: sanitizeStringArrayMap(input.tabRoles),
+		expectedTabs: clampExpectedTabs(input.expectedTabs),
+		returnToRole: input.returnToRole,
+		closeExtraTabs: Boolean(input.closeExtraTabs),
+		onUnexpectedTab: input.onUnexpectedTab === 'warn' || input.onUnexpectedTab === 'block' ? input.onUnexpectedTab : 'capture',
 		investigationName: input.investigationName,
 		allowedHosts
 	};
@@ -908,6 +930,20 @@ function sanitizeSelectorMap(values: Record<string, string> | undefined) {
 	if (entries.length === 0) {
 		return undefined;
 	}
+
+	return Object.fromEntries(entries);
+}
+
+function sanitizeStringArrayMap(values: Record<string, string[]> | undefined) {
+	if (!values || typeof values !== 'object') {
+		return {};
+	}
+
+	const entries = Object.entries(values)
+		.filter(([key, value]) => key.trim().length > 0 && Array.isArray(value))
+		.slice(0, 20)
+		.map(([key, value]) => [key.trim(), sanitizeStringList(value).slice(0, 20)] as const)
+		.filter(([, value]) => value.length > 0);
 
 	return Object.fromEntries(entries);
 }
@@ -1112,6 +1148,14 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 
 	if (action === 'sensitiveActionGuard' && !step.actionTemplate?.action && !step.selector && !step.text && !step.label && !step.targetHint) {
 		throw new Error('browserAct sensitiveActionGuard requires actionTemplate.action, selector, text, label, or targetHint.');
+	}
+
+	if (action === 'returnToTab' && !step.returnToRole && !Number.isInteger(step.targetTabIndex)) {
+		throw new Error('browserAct returnToTab requires returnToRole or targetTabIndex.');
+	}
+
+	if (action === 'tabOrchestrator' && step.closeExtraTabs && !step.confirmDangerous) {
+		throw new Error('browserAct tabOrchestrator closeExtraTabs requires confirmDangerous=true.');
 	}
 
 	if (action === 'buildEvidencePack' && !step.captureGroup && !step.investigationName) {
@@ -1339,6 +1383,14 @@ function clampMaxTabs(maxTabs: number | undefined) {
 	}
 
 	return Math.min(Math.max(Math.trunc(maxTabs), 1), 30);
+}
+
+function clampExpectedTabs(expectedTabs: number | undefined) {
+	if (typeof expectedTabs !== 'number' || !Number.isFinite(expectedTabs)) {
+		return undefined;
+	}
+
+	return Math.min(Math.max(Math.trunc(expectedTabs), 1), 50);
 }
 
 function clampDurationMs(value: number | undefined) {

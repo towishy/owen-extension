@@ -336,6 +336,22 @@ async function executeSingleAction(command, allowedHosts) {
     return runSensitiveActionGuard(command, allowedHosts);
   }
 
+  if (action === 'tabOrchestrator') {
+    return runTabOrchestrator(command, allowedHosts);
+  }
+
+  if (action === 'popupGuard') {
+    return runPopupGuard(command, allowedHosts);
+  }
+
+  if (action === 'returnToTab') {
+    return runReturnToTab(command, allowedHosts);
+  }
+
+  if (action === 'tabRunSummary') {
+    return runTabRunSummary(command, allowedHosts);
+  }
+
   if (action === 'buildEvidencePack') {
     return runBuildEvidencePack(command, allowedHosts);
   }
@@ -2097,6 +2113,234 @@ async function runSensitiveActionGuard(command, allowedHosts) {
     candidates: Array.isArray(inspection?.rankedTargets) ? inspection.rankedTargets.slice(0, 5) : [],
     saferAlternative: decision !== 'pass' ? { action: 'readPage', captureAfter: false } : undefined
   };
+}
+
+async function runTabOrchestrator(command, allowedHosts) {
+  const { tabs, summaries } = await collectWindowTabSummaries(command, allowedHosts);
+  const unexpectedTabs = findUnexpectedTabs(summaries, command);
+  const missingRoles = findMissingTabRoles(summaries, command);
+  const actions = [];
+
+  if (unexpectedTabs.length > 0 && command.onUnexpectedTab === 'block') {
+    throw new Error(`Unexpected tabs detected: ${unexpectedTabs.map(tab => `${tab.index}:${tab.title || tab.url}`).join(', ')}`);
+  }
+
+  if (command.closeExtraTabs) {
+    if (!command.confirmDangerous) {
+      throw new Error('tabOrchestrator closeExtraTabs requires confirmDangerous=true.');
+    }
+
+    for (const summary of unexpectedTabs.filter(tab => !tab.active)) {
+      const target = tabs.find(tab => tab.id === summary.tabId);
+      if (hasTabId(target)) {
+        await chrome.tabs.remove(target.id);
+        actions.push({ action: 'closedExtraTab', tabIndex: summary.index, role: summary.role, url: summary.url });
+      }
+    }
+  }
+
+  let returnedTo;
+  if (command.returnToRole) {
+    returnedTo = await activateTabRole(command.returnToRole, command, allowedHosts);
+    actions.push({ action: 'activatedRole', role: command.returnToRole, tabIndex: returnedTo.index, url: returnedTo.url });
+  }
+
+  return {
+    ok: true,
+    action: 'tabOrchestrator',
+    expectedTabs: command.expectedTabs,
+    tabCount: summaries.length,
+    unexpectedCount: unexpectedTabs.length,
+    missingRoles,
+    returnedTo: returnedTo ? summarizeBrowserTab(returnedTo, classifyTabRole(returnedTo, command), command) : undefined,
+    actions,
+    onUnexpectedTab: command.onUnexpectedTab,
+    tabs: summaries
+  };
+}
+
+async function runPopupGuard(command, allowedHosts) {
+  const { summaries } = await collectWindowTabSummaries(command, allowedHosts);
+  const unexpectedTabs = findUnexpectedTabs(summaries, command);
+  const suspiciousTabs = summaries.filter(tab => tab.signals.some(signal => ['auth-popup', 'security-warning', 'permission-page', 'unknown-popup'].includes(signal)));
+  const findings = [...unexpectedTabs, ...suspiciousTabs.filter(tab => !unexpectedTabs.some(unexpected => unexpected.tabId === tab.tabId))];
+
+  if (findings.length > 0 && command.onUnexpectedTab === 'block') {
+    throw new Error(`Popup guard blocked ${findings.length} unexpected or sensitive tab(s).`);
+  }
+
+  return {
+    ok: true,
+    action: 'popupGuard',
+    mode: command.onUnexpectedTab,
+    blocked: false,
+    findingCount: findings.length,
+    findings,
+    tabs: summaries
+  };
+}
+
+async function runReturnToTab(command, allowedHosts) {
+  let target;
+  if (Number.isInteger(command.targetTabIndex)) {
+    target = await getTabByIndex(command.targetTabIndex);
+  } else if (command.returnToRole) {
+    target = await activateTabRole(command.returnToRole, command, allowedHosts);
+  } else {
+    throw new Error('returnToTab requires returnToRole or targetTabIndex.');
+  }
+
+  assertAllowedUrl(target.url, allowedHosts);
+  await chrome.tabs.update(target.id, { active: true });
+  return {
+    ok: true,
+    action: 'returnToTab',
+    tab: summarizeBrowserTab(target, classifyTabRole(target, command), command)
+  };
+}
+
+async function runTabRunSummary(command, allowedHosts) {
+  const { summaries } = await collectWindowTabSummaries(command, allowedHosts);
+  const roleCounts = summaries.reduce((counts, tab) => {
+    counts[tab.role] = (counts[tab.role] || 0) + 1;
+    return counts;
+  }, {});
+  const unexpectedTabs = findUnexpectedTabs(summaries, command);
+
+  return {
+    ok: true,
+    action: 'tabRunSummary',
+    tabCount: summaries.length,
+    activeTab: summaries.find(tab => tab.active),
+    roleCounts,
+    unexpectedTabs,
+    recommendedNextAction: unexpectedTabs.length > 0 ? 'popupGuard' : command.returnToRole ? 'returnToTab' : 'continue',
+    tabs: summaries
+  };
+}
+
+async function collectWindowTabSummaries(command, allowedHosts) {
+  const activeTab = await getActiveTab();
+  const tabs = await chrome.tabs.query({ windowId: activeTab.windowId });
+  const summaries = tabs
+    .filter(tab => hasTabId(tab))
+    .map(tab => summarizeBrowserTab(tab, classifyTabRole(tab, command), command));
+
+  for (const summary of summaries) {
+    if (summary.url && !summary.url.startsWith('chrome://') && !summary.url.startsWith('edge://')) {
+      assertAllowedUrl(summary.url, allowedHosts);
+    }
+  }
+
+  return { tabs, summaries };
+}
+
+function summarizeBrowserTab(tab, role, command) {
+  return {
+    tabId: tab.id,
+    windowId: tab.windowId,
+    index: tab.index,
+    active: Boolean(tab.active),
+    pinned: Boolean(tab.pinned),
+    status: tab.status,
+    role,
+    title: tab.title || '',
+    url: tab.url || '',
+    signals: inferTabSignals(tab, role, command)
+  };
+}
+
+function classifyTabRole(tab, command) {
+  const url = String(tab.url || '').toLowerCase();
+  const title = String(tab.title || '').toLowerCase();
+  const haystack = `${url} ${title}`;
+  const tabRoles = command.tabRoles && typeof command.tabRoles === 'object' ? command.tabRoles : {};
+
+  for (const [role, patterns] of Object.entries(tabRoles)) {
+    if (Array.isArray(patterns) && patterns.some(pattern => pattern && haystack.includes(String(pattern).toLowerCase()))) {
+      return role;
+    }
+  }
+
+  if (/login|signin|oauth|saml|authorize|microsoftonline|auth/.test(haystack)) {
+    return 'auth';
+  }
+
+  if (/callback|redirect|consent/.test(haystack)) {
+    return 'callback';
+  }
+
+  if (/download|blob:|data:/.test(haystack)) {
+    return 'download';
+  }
+
+  if (/detail|details|blade|panel|item|record/.test(haystack)) {
+    return 'detail';
+  }
+
+  if (tab.active) {
+    return 'main';
+  }
+
+  return 'unknown';
+}
+
+function inferTabSignals(tab, role, command) {
+  const url = String(tab.url || '').toLowerCase();
+  const title = String(tab.title || '').toLowerCase();
+  const signals = [];
+
+  if (role === 'auth') {
+    signals.push('auth-popup');
+  }
+  if (/privacy|certificate|not secure|security|blocked|warning|deceptive/.test(`${url} ${title}`)) {
+    signals.push('security-warning');
+  }
+  if (/permissions|extension|chrome:\/\/|edge:\/\//.test(`${url} ${title}`)) {
+    signals.push('permission-page');
+  }
+  if (role === 'unknown' && Number.isInteger(command.expectedTabs)) {
+    signals.push('unknown-popup');
+  }
+  if (tab.status && tab.status !== 'complete') {
+    signals.push('loading');
+  }
+
+  return signals;
+}
+
+function findUnexpectedTabs(summaries, command) {
+  const expectedTabs = Number.isInteger(command.expectedTabs) ? command.expectedTabs : undefined;
+  const tabRoles = command.tabRoles && typeof command.tabRoles === 'object' ? command.tabRoles : {};
+  const knownRoles = new Set(['main', 'auth', 'callback', 'download', 'detail', ...Object.keys(tabRoles)]);
+
+  return summaries.filter(tab => {
+    if (expectedTabs && summaries.length > expectedTabs && tab.role === 'unknown') {
+      return true;
+    }
+    if (!knownRoles.has(tab.role)) {
+      return true;
+    }
+    return tab.signals.includes('security-warning') || tab.signals.includes('permission-page');
+  });
+}
+
+function findMissingTabRoles(summaries, command) {
+  const tabRoles = command.tabRoles && typeof command.tabRoles === 'object' ? command.tabRoles : {};
+  return Object.keys(tabRoles).filter(role => !summaries.some(tab => tab.role === role));
+}
+
+async function activateTabRole(role, command, allowedHosts) {
+  const activeTab = await getActiveTab();
+  const tabs = await chrome.tabs.query({ windowId: activeTab.windowId });
+  const target = tabs.find(tab => hasTabId(tab) && classifyTabRole(tab, command) === role);
+  if (!hasTabId(target)) {
+    throw new Error(`No tab found for role: ${role}`);
+  }
+
+  assertAllowedUrl(target.url, allowedHosts);
+  await chrome.tabs.update(target.id, { active: true });
+  return target;
 }
 
 function runBuildNavigationGraph(command) {
