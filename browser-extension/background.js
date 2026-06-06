@@ -1772,6 +1772,44 @@ async function getOptions() {
 
 function collectPageSnapshot(includeHtml) {
   const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const scoreCaptureQuality = input => {
+    const findings = [];
+    let score = 100;
+    if (input.authLikely) {
+      score -= 35;
+      findings.push('auth-page-likely');
+    }
+    if (input.loadingLikely) {
+      score -= 25;
+      findings.push('loading-indicator-visible');
+    }
+    if (input.visibleText.length < 120) {
+      score -= 20;
+      findings.push('low-visible-text');
+    }
+    if (input.headings.length === 0) {
+      score -= 10;
+      findings.push('no-headings');
+    }
+    if (input.interactables.length === 0) {
+      score -= 10;
+      findings.push('no-interactables');
+    }
+    if (input.tables.some(table => table.rowCount === 0)) {
+      score -= 5;
+      findings.push('empty-table-detected');
+    }
+    if (!input.hasHtml) {
+      findings.push('html-snapshot-disabled');
+    }
+
+    const normalizedScore = Math.max(0, Math.min(100, score));
+    return {
+      score: normalizedScore,
+      level: normalizedScore >= 80 ? 'good' : normalizedScore >= 55 ? 'partial' : 'poor',
+      findings
+    };
+  };
   const isVisible = element => {
     if (!element) {
       return false;
@@ -2025,45 +2063,6 @@ function inspectTargetsOnPage(intent) {
     .slice(0, 25);
 
   return { ok: true, intent, rankedTargets };
-}
-
-function scoreCaptureQuality(input) {
-  const findings = [];
-  let score = 100;
-  if (input.authLikely) {
-    score -= 35;
-    findings.push('auth-page-likely');
-  }
-  if (input.loadingLikely) {
-    score -= 25;
-    findings.push('loading-indicator-visible');
-  }
-  if (input.visibleText.length < 120) {
-    score -= 20;
-    findings.push('low-visible-text');
-  }
-  if (input.headings.length === 0) {
-    score -= 10;
-    findings.push('no-headings');
-  }
-  if (input.interactables.length === 0) {
-    score -= 10;
-    findings.push('no-interactables');
-  }
-  if (input.tables.some(table => table.rowCount === 0)) {
-    score -= 5;
-    findings.push('empty-table-detected');
-  }
-  if (!input.hasHtml) {
-    findings.push('html-snapshot-disabled');
-  }
-
-  const normalizedScore = Math.max(0, Math.min(100, score));
-  return {
-    score: normalizedScore,
-    level: normalizedScore >= 80 ? 'good' : normalizedScore >= 55 ? 'partial' : 'poor',
-    findings
-  };
 }
 
 function normalizeText(value) {

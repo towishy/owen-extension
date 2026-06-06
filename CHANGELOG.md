@@ -6,6 +6,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-06-06
+
+- Fixed `readPage` and capture snapshots after adding capture quality scoring by keeping injected quality scoring logic inside the page context.
+
 ## [0.1.11] - 2026-06-06
 
 - Fixed paired browser tab detection when Chrome or Edge reports a valid tab id of `0`.

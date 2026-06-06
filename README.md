@@ -11,12 +11,13 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
-## New in 0.1.11
+## New in 0.1.12
 
 - Target inspection with `inspectTargets` ranks visual and accessibility candidates before clicking or typing.
 - Auto-healing target actions with `targetHint` and `autoHeal` retry likely candidates when selectors or text fail.
 - Capture quality scoring reports auth, loading, and low-evidence states in `screenSummary.captureQuality`.
 - Paired browser tab detection now accepts valid tab id `0` from Chrome or Edge.
+- `readPage` and capture snapshots correctly include page state after capture quality scoring.
 
 ## What It Captures
 
@@ -56,7 +57,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.11.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.12.vsix --force
 ```
 
 macOS terminal:
@@ -66,7 +67,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.11.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.12.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
