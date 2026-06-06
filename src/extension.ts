@@ -170,7 +170,9 @@ type BrowserStepInput = {
 	highlightText?: string;
 	goal?: string;
 	claim?: string;
+	requiredClaims?: string[];
 	keyColumns?: string[];
+	detailSelector?: string;
 	waitPreset?: 'defenderIncidentReady' | 'azureBladeReady' | 'entraTableReady' | 'genericPortalReady';
 	contractName?: string;
 	contractSelectors?: string[];
@@ -234,6 +236,10 @@ type BrowserAction =
 	| 'evidenceClaimCheck'
 	| 'tableWatchAndDiff'
 	| 'browserRunBundle'
+	| 'safeActionPreview'
+	| 'stableTargetProfile'
+	| 'guidedDrilldown'
+	| 'evidenceCompletenessCheck'
 	| 'buildEvidencePack'
 	| 'buildNavigationGraph'
 	| 'assertPageContract'
@@ -338,7 +344,9 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	highlightText?: string;
 	goal?: string;
 	claim?: string;
+	requiredClaims: string[];
 	keyColumns: string[];
+	detailSelector?: string;
 	waitPreset?: 'defenderIncidentReady' | 'azureBladeReady' | 'entraTableReady' | 'genericPortalReady';
 	contractName?: string;
 	contractSelectors: string[];
@@ -725,7 +733,7 @@ const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
 	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
 	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'visualAssert', 'accessibilitySnapshot', 'mapForm',
-	'watchPageChanges', 'highlightEvidence', 'planAndRun', 'evidenceClaimCheck', 'tableWatchAndDiff', 'browserRunBundle', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
+	'watchPageChanges', 'highlightEvidence', 'planAndRun', 'evidenceClaimCheck', 'tableWatchAndDiff', 'browserRunBundle', 'safeActionPreview', 'stableTargetProfile', 'guidedDrilldown', 'evidenceCompletenessCheck', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
 	'captureReviewQueue', 'startBrowserJob', 'getBrowserJob', 'cancelBrowserJob', 'recordWorkflow', 'replayWorkflow',
 	'resumeAfterAuth', 'runWorkflow'
 ];
@@ -850,7 +858,9 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		highlightText: input.highlightText,
 		goal: input.goal,
 		claim: input.claim,
+		requiredClaims: sanitizeStringList(input.requiredClaims),
 		keyColumns: sanitizeStringList(input.keyColumns),
+		detailSelector: input.detailSelector,
 		waitPreset: input.waitPreset,
 		contractName: input.contractName,
 		contractSelectors: sanitizeStringList(input.contractSelectors),
@@ -1079,6 +1089,22 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 		throw new Error('browserAct evidenceClaimCheck requires claim.');
 	}
 
+	if (action === 'safeActionPreview' && !step.actionTemplate?.action && !step.selector && !step.text && !step.label && !step.targetHint) {
+		throw new Error('browserAct safeActionPreview requires actionTemplate.action, selector, text, label, or targetHint.');
+	}
+
+	if (action === 'stableTargetProfile' && !step.selector && !step.text && !step.label && !step.targetHint) {
+		throw new Error('browserAct stableTargetProfile requires selector, text, label, or targetHint.');
+	}
+
+	if (action === 'guidedDrilldown' && !step.tableSelector && !step.itemSelector) {
+		throw new Error('browserAct guidedDrilldown requires tableSelector or itemSelector.');
+	}
+
+	if (action === 'evidenceCompletenessCheck' && !step.captureGroup && !step.investigationName && (!Array.isArray(step.requiredClaims) || step.requiredClaims.length === 0)) {
+		throw new Error('browserAct evidenceCompletenessCheck requires captureGroup, investigationName, or requiredClaims.');
+	}
+
 	if (action === 'buildEvidencePack' && !step.captureGroup && !step.investigationName) {
 		throw new Error('browserAct buildEvidencePack requires captureGroup or investigationName.');
 	}
@@ -1176,6 +1202,11 @@ async function writeBrowserCommandArtifacts(context: vscode.ExtensionContext, co
 
 	if (action === 'browserRunBundle') {
 		await writeBrowserRunBundle(context, stepResult, completion);
+		return;
+	}
+
+	if (action === 'evidenceCompletenessCheck') {
+		await writeEvidenceCompletenessReport(context, stepResult);
 	}
 }
 
@@ -2525,6 +2556,45 @@ async function writeBrowserRunBundle(context: vscode.ExtensionContext, stepResul
 	await fs.writeFile(path.join(bundleFolder, 'action-logs.json'), JSON.stringify(relatedLogs, null, 2), 'utf8');
 }
 
+async function writeEvidenceCompletenessReport(context: vscode.ExtensionContext, stepResult: Record<string, unknown>) {
+	const captureGroup = String(stepResult.captureGroup ?? '').trim();
+	const baseDir = await getCaptureBaseDir(context);
+	const groupFolder = await findCaptureGroupFolder(baseDir, captureGroup);
+	if (!groupFolder) {
+		await writeBrowserReportArtifact(context, 'evidenceCompletenessCheck', stepResult);
+		return;
+	}
+
+	const summary = await readCaptureGroup(groupFolder);
+	const claims = Array.isArray(stepResult.requiredClaims) ? stepResult.requiredClaims.map(String).filter(Boolean) : [];
+	const captureTexts = await Promise.all(summary.captures.map(async capture => ({
+		id: capture.id,
+		path: capture.markdownPath,
+		text: await fs.readFile(capture.markdownPath, 'utf8').catch(() => '')
+	})));
+	const checks = claims.map(claim => {
+		const terms = claim.toLowerCase().split(/[^a-z0-9가-힣_.-]+/).filter(term => term.length >= 3).slice(0, 20);
+		const matches = captureTexts.map(capture => {
+			const text = capture.text.toLowerCase();
+			const matchedTerms = terms.filter(term => text.includes(term));
+			return { captureId: capture.id, markdownPath: capture.path, matchedTerms, supportRatio: terms.length ? matchedTerms.length / terms.length : 0 };
+		}).filter(match => match.matchedTerms.length > 0);
+		const bestRatio = matches.reduce((max, match) => Math.max(max, match.supportRatio), 0);
+		return { claim, status: bestRatio >= 0.65 ? 'covered' : bestRatio >= 0.35 ? 'partial' : 'missing', bestRatio, matches };
+	});
+	const report = {
+		...stepResult,
+		generatedAt: new Date().toISOString(),
+		captureGroup: summary,
+		checks,
+		coveredCount: checks.filter(check => check.status === 'covered').length,
+		partialCount: checks.filter(check => check.status === 'partial').length,
+		missingCount: checks.filter(check => check.status === 'missing').length
+	};
+	await fs.writeFile(path.join(groupFolder, '_evidence-completeness.json'), JSON.stringify(report, null, 2), 'utf8');
+	await fs.writeFile(path.join(groupFolder, '_evidence-completeness.md'), renderEvidenceCompletenessMarkdown(report), 'utf8');
+}
+
 async function findCaptureGroupFolder(baseDir: string, captureGroup: string) {
 	if (!captureGroup) {
 		const entries = await fs.readdir(baseDir, { withFileTypes: true }).catch(() => []);
@@ -2642,6 +2712,30 @@ function renderBrowserRunBundleMarkdown(bundle: { bundleId: string; generatedAt:
 	}
 	lines.push('', '## Latest Command Result', '', '```json', JSON.stringify(bundle.latestCommandResult, null, 2), '```', '');
 	return lines.join('\n');
+}
+
+function renderEvidenceCompletenessMarkdown(report: { generatedAt: string; captureGroup: CaptureGroupSummary; coveredCount: number; partialCount: number; missingCount: number; checks: Array<{ claim: string; status: string; bestRatio: number; matches: Array<{ captureId: string; matchedTerms: string[] }> }> }) {
+	const lines = [
+		'# Evidence Completeness',
+		'',
+		`Generated: ${report.generatedAt}`,
+		`Host: ${report.captureGroup.host}`,
+		`Group: ${report.captureGroup.groupName}`,
+		`Captures: ${report.captureGroup.captureCount}`,
+		`Covered: ${report.coveredCount}`,
+		`Partial: ${report.partialCount}`,
+		`Missing: ${report.missingCount}`,
+		'',
+		'## Claims',
+		''
+	];
+	for (const check of report.checks) {
+		lines.push(`- ${check.status} (${check.bestRatio.toFixed(2)}) - ${check.claim}`);
+		for (const match of check.matches.slice(0, 3)) {
+			lines.push(`  - ${match.captureId}: ${match.matchedTerms.join(', ')}`);
+		}
+	}
+	return `${lines.join('\n')}\n`;
 }
 
 function decodeDataUrl(dataUrl: string) {

@@ -302,6 +302,22 @@ async function executeSingleAction(command, allowedHosts) {
     return runBrowserRunBundle(command, allowedHosts);
   }
 
+  if (action === 'safeActionPreview') {
+    return runSafeActionPreview(command, allowedHosts);
+  }
+
+  if (action === 'stableTargetProfile') {
+    return runStableTargetProfile(command, allowedHosts);
+  }
+
+  if (action === 'guidedDrilldown') {
+    return runGuidedDrilldown(command, allowedHosts);
+  }
+
+  if (action === 'evidenceCompletenessCheck') {
+    return runEvidenceCompletenessCheck(command, allowedHosts);
+  }
+
   if (action === 'buildEvidencePack') {
     return runBuildEvidencePack(command, allowedHosts);
   }
@@ -1724,6 +1740,140 @@ async function runBrowserRunBundle(command, allowedHosts) {
     title: tab.title,
     historyRunCount: executionRunHistory.size,
     message: 'Browser run bundle folder is assembled by the VS Code extension after this command result is logged.'
+  };
+}
+
+async function runSafeActionPreview(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const actionTemplate = command.actionTemplate && typeof command.actionTemplate === 'object' ? command.actionTemplate : {};
+  const previewCommand = { ...command, ...actionTemplate, action: actionTemplate.action || command.action };
+  const [{ result: inspection }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: inspectTargetsOnPage,
+    args: [buildTargetIntent(previewCommand)]
+  });
+  const targetAction = previewCommand.action || 'click';
+  const destructiveActions = new Set(['closeTab', 'safeDownloadAndHash', 'bulkActionFromList', 'rollbackToCheckpoint']);
+  const destructiveText = /delete|remove|disable|reset|revoke|block|quarantine|삭제|제거|차단|초기화/i.test(String(previewCommand.text || previewCommand.targetHint || previewCommand.label || ''));
+  const topTargets = Array.isArray(inspection?.rankedTargets) ? inspection.rankedTargets.slice(0, 5) : [];
+  return {
+    ok: true,
+    action: targetAction,
+    url: tab.url,
+    title: tab.title,
+    targetCount: topTargets.length,
+    recommendedTarget: topTargets[0],
+    candidates: topTargets,
+    requiresConfirmation: destructiveActions.has(targetAction) || destructiveText,
+    reasons: [destructiveActions.has(targetAction) ? 'destructive-action' : undefined, destructiveText ? 'destructive-target-text' : undefined].filter(Boolean)
+  };
+}
+
+async function runStableTargetProfile(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const [{ result: inspection }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: inspectTargetsOnPage,
+    args: [buildTargetIntent(command)]
+  });
+  const profiles = (Array.isArray(inspection?.rankedTargets) ? inspection.rankedTargets : []).slice(0, 10).map(target => {
+    const selector = String(target.selectorHint || '');
+    let stabilityScore = Number(target.score || 0);
+    const reasons = Array.isArray(target.reasons) ? [...target.reasons] : [];
+    if (selector.startsWith('#') || selector.includes('data-testid')) {
+      stabilityScore += 20;
+      reasons.push('strong-selector');
+    }
+    if (target.accessibleName) {
+      stabilityScore += 8;
+      reasons.push('accessible-name');
+    }
+    if (target.interactableScore?.enabled && target.interactableScore?.notOverlapped && target.interactableScore?.inViewport) {
+      stabilityScore += 10;
+      reasons.push('ready-to-act');
+    }
+    return {
+      ...target,
+      stabilityScore: Math.max(0, Math.min(100, stabilityScore)),
+      recommendedLocator: selector || target.accessibleName || target.text,
+      fallbackTexts: [target.accessibleName, target.text].filter(Boolean).slice(0, 3),
+      reasons
+    };
+  }).sort((a, b) => b.stabilityScore - a.stabilityScore);
+  return { ok: true, url: tab.url, title: tab.title, intent: inspection?.intent, recommendedTarget: profiles[0], profiles };
+}
+
+async function runGuidedDrilldown(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const maxItems = Math.min(Math.max(Number(command.maxItems) || 3, 1), 10);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: async (tableSelector, itemSelector, matchText, detailSelector, max) => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const matchesNeedle = value => !matchText || normalize(value).toLowerCase().includes(String(matchText).toLowerCase());
+      const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+      const roots = itemSelector
+        ? Array.from(document.querySelectorAll(itemSelector))
+        : Array.from((tableSelector ? document.querySelector(tableSelector) : document.querySelector('table,[role="table"],[role="grid"]'))?.querySelectorAll('tr,[role="row"]') || []);
+      const rows = roots.filter(row => matchesNeedle(row.textContent || '')).slice(0, max);
+      const items = [];
+      for (let index = 0; index < rows.length; index += 1) {
+        const row = rows[index];
+        const rowText = normalize(row.textContent || '');
+        row.scrollIntoView({ block: 'center', inline: 'nearest' });
+        const clickTarget = row.querySelector('button,a,[role="button"],[tabindex]') || row;
+        clickTarget.click();
+        await wait(500);
+        const detail = detailSelector ? document.querySelector(detailSelector) : undefined;
+        const detailText = detail ? normalize(detail.textContent || '') : '';
+        const rect = row.getBoundingClientRect();
+        items.push({
+          index,
+          rowText,
+          clicked: true,
+          detailFound: Boolean(detail),
+          detailText: detailText.slice(0, 4000),
+          bounds: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
+        });
+      }
+      return { ok: true, matchText, matchedCount: rows.length, items };
+    },
+    args: [command.tableSelector, command.itemSelector, command.matchText, command.detailSelector, maxItems]
+  });
+  return result || { ok: true, matchedCount: 0, items: [] };
+}
+
+async function runEvidenceCompletenessCheck(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const requiredClaims = Array.isArray(command.requiredClaims) ? command.requiredClaims.filter(Boolean).slice(0, 20) : [];
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: claims => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const text = normalize(document.body?.innerText || '');
+      const lowerText = text.toLowerCase();
+      const checks = claims.map(claim => {
+        const terms = normalize(claim).toLowerCase().split(/[^a-z0-9가-힣_.-]+/).filter(term => term.length >= 3).slice(0, 20);
+        const matchedTerms = terms.filter(term => lowerText.includes(term));
+        const supportRatio = terms.length ? matchedTerms.length / terms.length : 0;
+        return { claim, status: supportRatio >= 0.65 ? 'visible' : supportRatio >= 0.35 ? 'partial' : 'missing', supportRatio, matchedTerms };
+      });
+      return { visibleTextLength: text.length, checks };
+    },
+    args: [requiredClaims]
+  });
+  return {
+    ok: true,
+    captureGroup: String(command.captureGroup || command.investigationName || '').trim(),
+    requiredClaims,
+    currentPage: result,
+    url: tab.url,
+    title: tab.title,
+    message: 'Capture-group completeness files are assembled by the VS Code extension when a capture group is available.'
   };
 }
 

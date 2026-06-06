@@ -152,6 +152,10 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `evidenceClaimCheck` | Check a report claim against visible page/table evidence | `claim`, `tableSelector` | New | `#browserAct { "action": "evidenceClaimCheck", "claim": "Alpha is Open", "tableSelector": "#data-table" }` |
 | `tableWatchAndDiff` | Watch a table and return row-level diff | `tableSelector`, `keyColumns`, `watchDurationMs` | New | `#browserAct { "action": "tableWatchAndDiff", "tableSelector": "#data-table", "keyColumns": ["Name"], "watchDurationMs": 1500 }` |
 | `browserRunBundle` | Assemble a capture-group run bundle | `captureGroup` | New | `#browserAct { "action": "browserRunBundle", "captureGroup": "case-001", "captureAfter": false }` |
+| `safeActionPreview` | Preview target and risk before acting | `actionTemplate`, `targetHint`, `selector`, `text` | New | `#browserAct { "action": "safeActionPreview", "actionTemplate": { "action": "click", "targetHint": "Evidence" } }` |
+| `stableTargetProfile` | Rank stable selector/accessibility candidates | `targetHint`, `selector`, `text`, `label` | New | `#browserAct { "action": "stableTargetProfile", "targetHint": "Evidence", "captureAfter": false }` |
+| `guidedDrilldown` | Open matching rows and collect detail text | `tableSelector`, `itemSelector`, `matchText`, `detailSelector` | New | `#browserAct { "action": "guidedDrilldown", "tableSelector": "#data-table", "matchText": "High", "detailSelector": "#details" }` |
+| `evidenceCompletenessCheck` | Check capture-group coverage for required claims | `captureGroup`, `requiredClaims` | New | `#browserAct { "action": "evidenceCompletenessCheck", "captureGroup": "case-001", "requiredClaims": ["severity"] }` |
 | `waitPreset` | Wait for named portal readiness conditions | `waitPreset` | New | `#browserAct { "action": "waitPreset", "waitPreset": "genericPortalReady", "captureAfter": false }` |
 | `assertPageContract` | Verify expected page selectors/texts | `contractName`, `contractSelectors`, `contractTexts` | New | `#browserAct { "action": "assertPageContract", "contractSelectors": ["#data-table"], "contractTexts": ["READY_MARKER"] }` |
 | `buildEvidencePack` | Write capture-group evidence pack files | `captureGroup` | New | `#browserAct { "action": "buildEvidencePack", "captureGroup": "case-001", "captureAfter": false }` |
@@ -199,7 +203,9 @@ Use these inputs with `#browserAct` for higher reliability on modern web apps:
 | `params` | Template values for replay (`{{key}}`) |
 | `goal` | Natural-language goal for `planAndRun` |
 | `claim` | Report statement checked by `evidenceClaimCheck` |
+| `requiredClaims` | Required claim/category list for `evidenceCompletenessCheck` |
 | `keyColumns` | Stable row-key columns for `tableWatchAndDiff` |
+| `detailSelector` | Detail panel selector for `guidedDrilldown` |
 | `waitPreset` | Named readiness preset: `genericPortalReady`, `defenderIncidentReady`, `azureBladeReady`, `entraTableReady` |
 | `contractName` | Named contract for `assertPageContract` |
 | `contractSelectors` | Selectors that must be visible |
@@ -227,6 +233,10 @@ New actions:
 | `evidenceClaimCheck` | Return supported/not-enough-evidence verdict with matching terms, snippets, and table rows | `claim`, `tableSelector` |
 | `tableWatchAndDiff` | Compare two table snapshots and report added, removed, and changed rows | `tableSelector`, `keyColumns`, `watchDurationMs` |
 | `browserRunBundle` | Create `_run-bundles/<id>/` with manifest, README, action logs, and capture references | `captureGroup` |
+| `safeActionPreview` | Show the element that would be acted on and whether confirmation is needed | `actionTemplate`, `targetHint` |
+| `stableTargetProfile` | Score target candidates by selector strength, accessibility name, and interactability | `targetHint`, `selector`, `text`, `label` |
+| `guidedDrilldown` | Click matching table/list rows and collect detail panel evidence | `tableSelector`, `itemSelector`, `matchText`, `detailSelector` |
+| `evidenceCompletenessCheck` | Write `_evidence-completeness.md/json` when a capture group is available | `captureGroup`, `requiredClaims` |
 | `waitPreset` | Run a named readiness wait and contract check | `waitPreset` |
 | `assertPageContract` | Check page selectors/texts or named portal contracts | `contractName`, `contractSelectors`, `contractTexts` |
 | `buildEvidencePack` | Assemble `_evidence-pack.md` and `_evidence-pack.json` in a capture group | `captureGroup` |
@@ -243,6 +253,8 @@ Prefer `accessibilitySnapshot` before uncertain clicks and `mapForm` before `sma
 Use `waitPreset` before portal-specific evidence collection, then `assertPageContract` before extracting tables or summarizing visible evidence. After collecting multiple captures, call `buildEvidencePack` and `buildNavigationGraph` so downstream analysis can correlate action flow, captures, and screenshots. Use `createHandoff` when automation reaches a point where the operator should continue manually.
 
 Use `planAndRun` when the user gives a goal rather than exact selectors, but keep `captureAfter: false` until the generated steps are known to be useful. Use `evidenceClaimCheck` before writing final report claims. Use `tableWatchAndDiff` for portal grids that refresh in place, and `browserRunBundle` at handoff time after captures and evidence packs exist.
+
+Use `safeActionPreview` before destructive or ambiguous clicks, then `stableTargetProfile` when a target needs a durable selector. Use `guidedDrilldown` for table-to-detail workflows. Run `evidenceCompletenessCheck` before final handoff to identify missing report claims.
 
 Semantic expressions for `semanticWait` or `wait.kind=semantic`:
 

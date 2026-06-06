@@ -11,6 +11,13 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
+## New in 0.1.21
+
+- Added `safeActionPreview` to preview targets and confirmation risk before click/type-style actions.
+- Added `stableTargetProfile` to rank selector, text, role, and accessibility target candidates by stability.
+- Added `guidedDrilldown` to open matching table/list rows and collect detail panel evidence.
+- Added `evidenceCompletenessCheck` to check capture-group evidence coverage and write completeness reports.
+
 ## New in 0.1.20
 
 - Added `planAndRun` to turn a goal into a guarded browser workflow using existing readiness, contract, table, and highlight actions.
@@ -102,7 +109,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.20.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.21.vsix --force
 ```
 
 macOS terminal:
@@ -112,7 +119,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.20.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.21.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -236,9 +243,23 @@ For paired browser control on allowed hosts:
 
 Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, text sample, and capture quality. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are also available: `wait`, `waitPreset`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `visualAssert`, `accessibilitySnapshot`, `mapForm`, `watchPageChanges`, `highlightEvidence`, `planAndRun`, `evidenceClaimCheck`, `tableWatchAndDiff`, `browserRunBundle`, `buildEvidencePack`, `buildNavigationGraph`, `assertPageContract`, `createHandoff`, `selectorHealthReport`, `captureReviewQueue`, `startBrowserJob`, `getBrowserJob`, `cancelBrowserJob`, `recordWorkflow`, `replayWorkflow`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are also available: `wait`, `waitPreset`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `visualAssert`, `accessibilitySnapshot`, `mapForm`, `watchPageChanges`, `highlightEvidence`, `planAndRun`, `evidenceClaimCheck`, `tableWatchAndDiff`, `browserRunBundle`, `safeActionPreview`, `stableTargetProfile`, `guidedDrilldown`, `evidenceCompletenessCheck`, `buildEvidencePack`, `buildNavigationGraph`, `assertPageContract`, `createHandoff`, `selectorHealthReport`, `captureReviewQueue`, `startBrowserJob`, `getBrowserJob`, `cancelBrowserJob`, `recordWorkflow`, `replayWorkflow`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` supports `preset`, `steps`, `goal`, `claim`, `retries`, `retryProfile`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `selectorMemory`, `targetHint`, `targetScope`, `frameDepth`, `captureBeforeAfter`, `assertText`, `assertNoText`, `assertSelector`, `assertNotSelector`, `assertScreenshotChanged`, `watchDurationMs`, `highlightSelectors`, `highlightText`, `waitPreset`, `contractName`, `contractSelectors`, `contractTexts`, `captureGroup`, `jobName`, `keyColumns`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `macroName`, `params`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, capture element/region evidence, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, table diffing, claim checking, checkpoint rollback, manual review gates, policy checks, visual assertions, page watching, evidence highlighting, evidence pack building, navigation graphing, browser run bundling, contract checks, handoff reports, selector health reports, and reusable macro playback.
+`#browserAct` supports `preset`, `steps`, `goal`, `claim`, `requiredClaims`, `retries`, `retryProfile`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `selectorMemory`, `targetHint`, `targetScope`, `frameDepth`, `captureBeforeAfter`, `assertText`, `assertNoText`, `assertSelector`, `assertNotSelector`, `assertScreenshotChanged`, `watchDurationMs`, `highlightSelectors`, `highlightText`, `waitPreset`, `contractName`, `contractSelectors`, `contractTexts`, `captureGroup`, `jobName`, `keyColumns`, `detailSelector`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `macroName`, `params`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, preview actions, profile stable targets, drill into matching rows, capture element/region evidence, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, table diffing, claim checking, evidence completeness checks, checkpoint rollback, manual review gates, policy checks, visual assertions, page watching, evidence highlighting, evidence pack building, navigation graphing, browser run bundling, contract checks, handoff reports, selector health reports, and reusable macro playback.
+
+Example: preview and profile a target before acting
+
+```text
+#browserAct { "action": "safeActionPreview", "actionTemplate": { "action": "click", "targetHint": "Evidence" }, "captureAfter": false } preview which element would be clicked and whether confirmation is needed.
+#browserAct { "action": "stableTargetProfile", "targetHint": "Evidence", "captureAfter": false } rank stable selector and accessibility candidates for the Evidence target.
+```
+
+Example: drill down and check evidence completeness
+
+```text
+#browserAct { "action": "guidedDrilldown", "tableSelector": "#data-table", "matchText": "High", "detailSelector": "#details", "maxItems": 3, "captureAfter": true } open matching rows and collect detail text.
+#browserAct { "action": "evidenceCompletenessCheck", "captureGroup": "incident-12345", "requiredClaims": ["severity", "timeline", "affected user"], "captureAfter": false } check whether the capture group covers required report claims.
+```
 
 Example: guarded goal execution and claim checking
 

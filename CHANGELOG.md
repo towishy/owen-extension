@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-06-06
+
+- Added `safeActionPreview` to preview target and confirmation risk before acting.
+- Added `stableTargetProfile` for durable selector and accessibility target scoring.
+- Added `guidedDrilldown` for table/list row-to-detail workflows.
+- Added `evidenceCompletenessCheck` with capture-group completeness artifacts.
+
 ## [0.1.20] - 2026-06-06
 
 - Added `planAndRun` for guarded goal-driven browser workflows.
