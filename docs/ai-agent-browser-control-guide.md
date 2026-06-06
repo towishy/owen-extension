@@ -143,6 +143,7 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `semanticWait` | Wait for semantic page conditions | `semanticConditions` | Success | `#browserAct { "action": "semanticWait", "semanticConditions": ["text:READY_MARKER", "selector:#data-table"] }` |
 | `compareCaptureRuns` | Compare two recent action runs | `baseRunId`, `newRunId`, `ignoreSelectors` | Success | `#browserAct { "action": "compareCaptureRuns" }` |
 | `policyGuard` | Check host/action policy before proceeding | `policyProfile`, `onViolation`, `actionTemplate` | Success | `#browserAct { "action": "policyGuard", "policyProfile": "standard", "onViolation": "block", "actionTemplate": { "action": "click" } }` |
+| `visualAssert` | Assert current visual/page state | `assertText`, `assertNoText`, `assertSelector`, `assertNotSelector`, `assertScreenshotChanged` | New | `#browserAct { "action": "visualAssert", "assertText": "READY_MARKER", "assertSelector": "#data-table", "captureAfter": false }` |
 | `resumeAfterAuth` | Continue after manual sign-in | none | Conditional: only valid after `AUTH_REQUIRED`; no pending auth in smoke test | `#browserAct { "action": "resumeAfterAuth" }` |
 
 ## Wait Conditions
@@ -174,9 +175,18 @@ Use these inputs with `#browserAct` for higher reliability on modern web apps:
 | `targetScope` | Target lookup scope: `auto`, `main`, `allFrames`, `shadowDeep` |
 | `frameDepth` | Max same-origin iframe traversal depth |
 | `retryProfile` | Retry preset: `conservative`, `standard`, `aggressive` |
+| `selectorMemory` | Enables or disables host/intent selector memory reuse |
 | `captureBeforeAfter` | Adds lightweight before/after DOM diff metadata |
 | `macroName` | Macro identifier for `recordWorkflow` and `replayWorkflow` |
 | `params` | Template values for replay (`{{key}}`) |
+
+Use `visualAssert` after click/type/navigation steps when the important question is whether the UI actually reached the expected state. Prefer `assertText` plus `assertSelector` for portal pages where a click can succeed without changing the active blade or table.
+
+Selector memory is enabled by default. When auto-heal or a remembered selector succeeds for the same host and target intent, later actions try that remembered target before ordinary fallback selectors. Set `selectorMemory: false` on a step when testing a brand-new selector path.
+
+For debugging, run `Owen Browser Bridge: Show Action Trace` in VS Code. It opens a compact Markdown table from the latest `_action-logs/browser-actions-*.jsonl` file, including command ids, actions, step counts, diff metadata, and stored capture links.
+
+Captured JSON and Markdown are redacted before storage. Use `owenBrowserBridge.redactionProfile` (`off`, `standard`, `strict`) and `owenBrowserBridge.customRedactionPatterns` for site-specific sensitive strings. Do not commit raw captures or screenshots.
 
 New actions:
 

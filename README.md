@@ -11,6 +11,19 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
+## New in 0.1.16
+
+- Added `visualAssert` for post-action text, selector, and page fingerprint assertions.
+- Added selector memory so successful and auto-healed targets can be reused per host and intent.
+- Added `Owen Browser Bridge: Show Action Trace` to inspect recent action logs from VS Code.
+- Added configurable capture redaction profiles: `off`, `standard`, and `strict`, plus custom regex patterns.
+
+## New in 0.1.15
+
+- Added deep target lookup across Shadow DOM and same-origin iframes with `targetScope` and `frameDepth`.
+- Added `networkIdle` and `requestDone` wait conditions.
+- Added `retryProfile`, `captureBeforeAfter`, `recordWorkflow`, and `replayWorkflow`.
+
 ## New in 0.1.14
 
 - Added `captureElement` for selector/targetHint-based panel or box evidence capture.
@@ -68,7 +81,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.14.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.16.vsix --force
 ```
 
 macOS terminal:
@@ -78,7 +91,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.14.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.16.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -202,9 +215,17 @@ For paired browser control on allowed hosts:
 
 Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, text sample, and capture quality. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `recordWorkflow`, `replayWorkflow`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `visualAssert`, `recordWorkflow`, `replayWorkflow`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` supports `preset`, `steps`, `retries`, `retryProfile`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `targetHint`, `targetScope`, `frameDepth`, `captureBeforeAfter`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `macroName`, `params`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, capture element/region evidence, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, checkpoint rollback, manual review gates, policy checks, and reusable macro playback.
+`#browserAct` supports `preset`, `steps`, `retries`, `retryProfile`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `selectorMemory`, `targetHint`, `targetScope`, `frameDepth`, `captureBeforeAfter`, `assertText`, `assertNoText`, `assertSelector`, `assertNotSelector`, `assertScreenshotChanged`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `macroName`, `params`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, capture element/region evidence, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, checkpoint rollback, manual review gates, policy checks, visual assertions, and reusable macro playback.
+
+Example: assert the UI state after an action
+
+```text
+#browserAct { "action": "visualAssert", "assertText": "READY_MARKER", "assertSelector": "#data-table", "captureAfter": false } verify the current page is ready before collecting evidence.
+```
+
+To inspect recent automation evidence, run `Owen Browser Bridge: Show Action Trace` from the VS Code Command Palette. Capture redaction can be adjusted with `owenBrowserBridge.redactionProfile` and `owenBrowserBridge.customRedactionPatterns`.
 
 `wait.kind` additionally supports `networkIdle` and `requestDone` so workflows can wait for API/resource completion patterns.
 

@@ -295,6 +295,14 @@ Open `Owen Browser Bridge: Open Setup Page` and add that page's hostname under *
 3. Keep an allowed Chrome/Edge tab active while Copilot waits for the action result.
 4. The extension polls for commands about every 30 seconds, so short delays are expected.
 
+### Inspect recent browser action traces
+
+Run `Owen Browser Bridge: Show Action Trace` from the VS Code Command Palette. The command opens a Markdown view of recent action log entries, including command ids, action names, step counts, before/after diff metadata, and stored capture links when available.
+
+### Configure capture redaction
+
+Stored JSON and Markdown captures use `owenBrowserBridge.redactionProfile` before files are written. The default is `standard`; use `strict` for broader token-like string masking or `off` only for controlled local tests. Add site-specific JavaScript regular expression strings to `owenBrowserBridge.customRedactionPatterns` when a portal exposes sensitive identifiers with a custom format.
+
 ### Browser popup shows `Cannot access a chrome:// URL`
 
 Chrome and Edge block extensions from reading internal pages such as `chrome://extensions` or `edge://extensions`. Open a normal HTTPS page and try again.

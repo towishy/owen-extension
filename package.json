@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -17,13 +17,6 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onCommand:owen-browser-bridge.openSetupPage",
-    "onCommand:owen-browser-bridge.startServer",
-    "onCommand:owen-browser-bridge.stopServer",
-    "onCommand:owen-browser-bridge.showLatestCapture",
-    "onCommand:owen-browser-bridge.openCapturesFolder",
-    "onCommand:owen-browser-bridge.copyPairingToken",
-    "onCommand:owen-browser-bridge.regeneratePairingToken",
     "onLanguageModelTool:get_latest_browser_capture",
     "onLanguageModelTool:get_browser_state",
     "onLanguageModelTool:read_browser_capture",
@@ -48,6 +41,10 @@
       {
         "command": "owen-browser-bridge.showLatestCapture",
         "title": "Owen Browser Bridge: Show Latest Capture"
+      },
+      {
+        "command": "owen-browser-bridge.showActionTrace",
+        "title": "Owen Browser Bridge: Show Action Trace"
       },
       {
         "command": "owen-browser-bridge.openCapturesFolder",
@@ -177,7 +174,7 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "recordWorkflow", "replayWorkflow", "resumeAfterAuth", "runWorkflow"],
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "visualAssert", "recordWorkflow", "replayWorkflow", "resumeAfterAuth", "runWorkflow"],
               "description": "Browser action to run. Defaults to readPage."
             },
             "selector": {
@@ -348,6 +345,30 @@
               "type": "object",
               "additionalProperties": { "type": "string" },
               "description": "Template parameters for replayWorkflow; replaces {{key}} placeholders in stored macro steps."
+            },
+            "assertText": {
+              "type": "string",
+              "description": "visualAssert passes when visible page text contains this value."
+            },
+            "assertNoText": {
+              "type": "string",
+              "description": "visualAssert passes when visible page text does not contain this value."
+            },
+            "assertSelector": {
+              "type": "string",
+              "description": "visualAssert passes when this selector is visible."
+            },
+            "assertNotSelector": {
+              "type": "string",
+              "description": "visualAssert passes when this selector is absent or hidden."
+            },
+            "assertScreenshotChanged": {
+              "type": "boolean",
+              "description": "visualAssert compares the current visual/text fingerprint with the previous assertion baseline."
+            },
+            "selectorMemory": {
+              "type": "boolean",
+              "description": "When true, successful remembered target selectors can be reused before ordinary fallback targets. Defaults to true."
             },
             "regionX": {
               "type": "number",
@@ -586,6 +607,20 @@
           "type": "boolean",
           "default": true,
           "description": "Start the local browser capture server when VS Code finishes startup."
+        },
+        "owenBrowserBridge.redactionProfile": {
+          "type": "string",
+          "enum": ["off", "standard", "strict"],
+          "default": "standard",
+          "description": "Redaction profile applied before browser capture JSON and Markdown files are stored."
+        },
+        "owenBrowserBridge.customRedactionPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional JavaScript regular expression patterns applied to browser capture text before storage."
         }
       }
     }

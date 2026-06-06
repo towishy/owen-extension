@@ -158,6 +158,12 @@ type BrowserStepInput = {
 	macroName?: string;
 	params?: Record<string, string>;
 	steps?: BrowserStepInput[];
+	assertText?: string;
+	assertNoText?: string;
+	assertSelector?: string;
+	assertNotSelector?: string;
+	assertScreenshotChanged?: boolean;
+	selectorMemory?: boolean;
 };
 
 type BrowserPreset = 'defenderIncidentSurvey' | 'defenderIncidentAlerts' | 'defenderIncidentEvidence';
@@ -205,6 +211,7 @@ type BrowserAction =
 	| 'semanticWait'
 	| 'compareCaptureRuns'
 	| 'policyGuard'
+	| 'visualAssert'
 	| 'recordWorkflow'
 	| 'replayWorkflow'
 	| 'resumeAfterAuth'
@@ -289,6 +296,12 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	captureBeforeAfter: boolean;
 	macroName?: string;
 	params?: Record<string, string>;
+	assertText?: string;
+	assertNoText?: string;
+	assertSelector?: string;
+	assertNotSelector?: string;
+	assertScreenshotChanged: boolean;
+	selectorMemory: boolean;
 	investigationName?: string;
 	allowedHosts: string[];
 };
@@ -342,6 +355,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('owen-browser-bridge.startServer', async () => startServer(context, true)),
 		vscode.commands.registerCommand('owen-browser-bridge.stopServer', async () => stopServer(true)),
 		vscode.commands.registerCommand('owen-browser-bridge.showLatestCapture', async () => showLatestCapture(context)),
+		vscode.commands.registerCommand('owen-browser-bridge.showActionTrace', async () => showActionTrace(context)),
 		vscode.commands.registerCommand('owen-browser-bridge.openCapturesFolder', async () => openCapturesFolder(context)),
 		vscode.commands.registerCommand('owen-browser-bridge.copyPairingToken', async () => copyPairingToken(context)),
 		vscode.commands.registerCommand('owen-browser-bridge.regeneratePairingToken', async () => regeneratePairingToken(context)),
@@ -531,6 +545,31 @@ async function showLatestCapture(context: vscode.ExtensionContext) {
 	await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(latest.markdownPath));
 }
 
+async function showActionTrace(context: vscode.ExtensionContext) {
+	const baseDir = await getCaptureBaseDir(context);
+	const logDir = path.join(baseDir, '_action-logs');
+	const entries = await fs.readdir(logDir, { withFileTypes: true }).catch(() => []);
+	const latestLog = entries
+		.filter(entry => entry.isFile() && entry.name.startsWith('browser-actions-') && entry.name.endsWith('.jsonl'))
+		.map(entry => path.join(logDir, entry.name))
+		.sort()
+		.reverse()[0];
+
+	if (!latestLog) {
+		vscode.window.showInformationMessage('No browser action trace log exists yet.');
+		return;
+	}
+
+	const lines = (await fs.readFile(latestLog, 'utf8'))
+		.split(/\r?\n/)
+		.filter(Boolean)
+		.slice(-25)
+		.map(line => JSON.parse(line) as Record<string, unknown>);
+	const markdown = renderActionTraceMarkdown(latestLog, lines);
+	const document = await vscode.workspace.openTextDocument({ content: markdown, language: 'markdown' });
+	await vscode.window.showTextDocument(document, { preview: true });
+}
+
 function createLatestCaptureTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<object> {
 	return {
 		async invoke() {
@@ -642,7 +681,7 @@ const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'listInteractables', 'inspectTargets', 'captureElement', 'captureRegion', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
 	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
 	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
-	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'recordWorkflow', 'replayWorkflow',
+	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'visualAssert', 'recordWorkflow', 'replayWorkflow',
 	'resumeAfterAuth', 'runWorkflow'
 ];
 
@@ -755,6 +794,12 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		captureBeforeAfter: Boolean(input.captureBeforeAfter),
 		macroName: sanitizeMacroName(input.macroName),
 		params: sanitizeSelectorMap(input.params),
+		assertText: input.assertText,
+		assertNoText: input.assertNoText,
+		assertSelector: input.assertSelector,
+		assertNotSelector: input.assertNotSelector,
+		assertScreenshotChanged: Boolean(input.assertScreenshotChanged),
+		selectorMemory: input.selectorMemory ?? true,
 		investigationName: input.investigationName,
 		allowedHosts
 	};
@@ -955,6 +1000,10 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 
 	if (action === 'policyGuard' && !step.policyProfile) {
 		throw new Error('browserAct policyGuard requires policyProfile.');
+	}
+
+	if (action === 'visualAssert' && !step.assertText && !step.assertNoText && !step.assertSelector && !step.assertNotSelector && !step.assertScreenshotChanged) {
+		throw new Error('browserAct visualAssert requires at least one assertion input.');
 	}
 
 	if (step.targetScope && !['auto', 'main', 'allFrames', 'shadowDeep'].includes(step.targetScope)) {
@@ -1245,6 +1294,48 @@ function renderBrowserStateMessage(state: BrowserSessionState) {
 		summary ? 'Use screenSummary.interactables, formFields, headings, landmarks, tables, and viewport to decide the next browser action.' : undefined
 	].filter(Boolean) as string[];
 	return lines.join('\n');
+}
+
+function renderActionTraceMarkdown(logPath: string, entries: Record<string, unknown>[]) {
+	const lines = [
+		'# Owen Browser Action Trace',
+		'',
+		`Log: ${logPath}`,
+		'',
+		'| Time | Command | OK | Action | Notes |',
+		'| --- | --- | --- | --- | --- |'
+	];
+
+	for (const entry of entries) {
+		const result = entry.result as Record<string, unknown> | undefined;
+		const steps = Array.isArray(result?.steps) ? result.steps : [];
+		const firstStep = steps[0] as Record<string, unknown> | undefined;
+		const action = String(result?.action ?? firstStep?.action ?? 'unknown');
+		const notes = summarizeTraceEntry(entry);
+		lines.push(`| ${escapeMarkdownTable(String(entry.loggedAt ?? ''))} | ${escapeMarkdownTable(String(entry.commandId ?? ''))} | ${entry.ok === false ? 'no' : 'yes'} | ${escapeMarkdownTable(action)} | ${escapeMarkdownTable(notes)} |`);
+	}
+
+	return `${lines.join('\n')}\n`;
+}
+
+function summarizeTraceEntry(entry: Record<string, unknown>) {
+	if (entry.error) {
+		return String(entry.error);
+	}
+
+	const result = entry.result as Record<string, unknown> | undefined;
+	const steps = Array.isArray(result?.steps) ? result.steps : [];
+	const beforeAfterDiff = result?.beforeAfterDiff ? `diff=${JSON.stringify(result.beforeAfterDiff).slice(0, 160)}` : undefined;
+	const storedCapture = entry.storedCapture as Record<string, unknown> | undefined;
+	return [
+		steps.length > 0 ? `steps=${steps.length}` : undefined,
+		beforeAfterDiff,
+		storedCapture?.markdownPath ? `capture=${storedCapture.markdownPath}` : undefined
+	].filter(Boolean).join('; ') || 'completed';
+}
+
+function escapeMarkdownTable(value: string) {
+	return value.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').slice(0, 500);
 }
 
 function parseAuthRequiredResult(result: unknown): AuthRequiredResult | undefined {
@@ -2062,8 +2153,23 @@ function redactPayload(payload: BrowserCapturePayload): BrowserCapturePayload {
 		copy.page.visibleText = redactText(copy.page.visibleText);
 		copy.page.selection = redactText(copy.page.selection);
 		copy.page.html = copy.page.html ? (redactText(copy.page.html) ?? '').slice(0, 250000) : undefined;
+		copy.page.screenSummary = redactUnknown(copy.page.screenSummary) as Record<string, unknown> | undefined;
+		copy.page.metadata = redactUnknown(copy.page.metadata) as Record<string, unknown> | undefined;
 	}
 	return copy;
+}
+
+function redactUnknown(value: unknown): unknown {
+	if (typeof value === 'string') {
+		return redactText(value);
+	}
+	if (Array.isArray(value)) {
+		return value.map(item => redactUnknown(item));
+	}
+	if (value && typeof value === 'object') {
+		return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactUnknown(item)]));
+	}
+	return value;
 }
 
 function isAllowedHost(hostname: string, allowedHosts: string[]) {
@@ -2101,11 +2207,33 @@ function redactText(value: string | undefined) {
 		return value;
 	}
 
-	return value
+	const profile = getConfig().get<string>('redactionProfile', 'standard');
+	if (profile === 'off') {
+		return value;
+	}
+
+	let redacted = value
 		.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
 		.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[redacted-ip]')
 		.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '[redacted-guid]')
-		.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer [redacted-token]');
+		.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer [redacted-token]')
+		.replace(/(access_token|refresh_token|id_token|sessionid|session_id|sid)=([^\s&]+)/gi, '$1=[redacted-token]');
+
+	if (profile === 'strict') {
+		redacted = redacted
+			.replace(/\b(?:[A-Za-z0-9+/]{20,}={0,2})\b/g, '[redacted-long-token]')
+			.replace(/\b(?:[0-9a-f]{32,})\b/gi, '[redacted-hex-token]');
+	}
+
+	for (const pattern of getConfig().get<string[]>('customRedactionPatterns', [])) {
+		try {
+			redacted = redacted.replace(new RegExp(pattern, 'g'), '[redacted-custom]');
+		} catch {
+			output?.appendLine(`Ignoring invalid custom redaction pattern: ${pattern}`);
+		}
+	}
+
+	return redacted;
 }
 
 function renderMarkdown(payload: BrowserCapturePayload, screenshotFile?: string) {

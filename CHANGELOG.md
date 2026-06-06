@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-06-06
+
+- Added `visualAssert` for post-action text, selector, and page fingerprint assertions.
+- Added selector memory so successful and auto-healed targets can be reused on later actions for the same host and intent.
+- Added `Owen Browser Bridge: Show Action Trace` to inspect recent browser action logs from VS Code.
+- Added configurable capture redaction profiles and custom redaction regex patterns for stored JSON and Markdown evidence.
+
 ## [0.1.15] - 2026-06-06
 
 - Added deep target lookup across Shadow DOM and same-origin iframes with `targetScope` and `frameDepth`.

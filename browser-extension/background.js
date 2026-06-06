@@ -14,6 +14,8 @@ const executionRunHistory = new Map();
 const BROWSER_SESSION_STORAGE_KEY = 'owenBrowserSessionId';
 const LATEST_BROWSER_STATE_STORAGE_KEY = 'owenLatestBrowserState';
 const WORKFLOW_MACROS_STORAGE_KEY = 'owenWorkflowMacros';
+const SELECTOR_MEMORY_STORAGE_KEY = 'owenSelectorMemory';
+const VISUAL_ASSERT_STORAGE_KEY = 'owenVisualAssertBaseline';
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('owen-command-poll', { periodInMinutes: 0.5 });
@@ -263,6 +265,10 @@ async function executeSingleAction(command, allowedHosts) {
     return runPolicyGuard(command, allowedHosts);
   }
 
+  if (action === 'visualAssert') {
+    return runVisualAssert(command, allowedHosts);
+  }
+
   if (action === 'recordWorkflow') {
     return runRecordWorkflow(command);
   }
@@ -366,7 +372,7 @@ async function executeSingleAction(command, allowedHosts) {
     return runCaptureRegion(command, allowedHosts);
   }
 
-  const targets = buildTargetCandidates(command);
+  const targets = await buildTargetCandidatesWithMemory(command, tab);
   const retryProfile = String(command.retryProfile || 'standard');
   const profileRetries = retryProfile === 'conservative' ? 0 : retryProfile === 'aggressive' ? 3 : 1;
   const maxRetries = Number.isInteger(command.retries) ? command.retries : profileRetries;
@@ -384,6 +390,7 @@ async function executeSingleAction(command, allowedHosts) {
         args: [{ ...command, ...candidate }]
       });
       if (!result?.error) {
+        await rememberSelectorSuccess(command, tab, candidate, false).catch(() => undefined);
         return result ?? { ok: true };
       }
 
@@ -417,6 +424,7 @@ async function executeSingleAction(command, allowedHosts) {
         args: [{ ...command, ...candidate }]
       });
       if (!result?.error) {
+        await rememberSelectorSuccess(command, tab, candidate, true).catch(() => undefined);
         return { ...(result ?? { ok: true }), autoHealed: true, target: candidate, inspection };
       }
 
@@ -1067,6 +1075,148 @@ async function runPolicyGuard(command, allowedHosts) {
     violations,
     passed: violations.length === 0
   };
+}
+
+async function runVisualAssert(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: input => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const visibleText = normalize(document.body?.innerText ?? '');
+      const isVisible = element => {
+        if (!element) {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
+      };
+      const assertions = [];
+      const add = (name, passed, detail) => assertions.push({ name, passed, detail });
+      if (input.assertText) {
+        add('assertText', visibleText.includes(String(input.assertText)), input.assertText);
+      }
+      if (input.assertNoText) {
+        add('assertNoText', !visibleText.includes(String(input.assertNoText)), input.assertNoText);
+      }
+      if (input.assertSelector) {
+        add('assertSelector', isVisible(document.querySelector(String(input.assertSelector))), input.assertSelector);
+      }
+      if (input.assertNotSelector) {
+        add('assertNotSelector', !isVisible(document.querySelector(String(input.assertNotSelector))), input.assertNotSelector);
+      }
+      let hash = 2166136261;
+      for (let i = 0; i < visibleText.length; i += 1) {
+        hash ^= visibleText.charCodeAt(i);
+        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+      }
+      return {
+        assertions,
+        fingerprint: {
+          hash: `h${(hash >>> 0).toString(16)}`,
+          textLength: visibleText.length,
+          title: document.title,
+          url: location.href
+        }
+      };
+    },
+    args: [command]
+  });
+
+  const stored = await chrome.storage.local.get(VISUAL_ASSERT_STORAGE_KEY);
+  const previous = stored[VISUAL_ASSERT_STORAGE_KEY];
+  const assertions = Array.isArray(result?.assertions) ? result.assertions : [];
+  if (command.assertScreenshotChanged) {
+    assertions.push({
+      name: 'assertScreenshotChanged',
+      passed: Boolean(previous?.hash && result?.fingerprint?.hash && previous.hash !== result.fingerprint.hash),
+      detail: previous?.hash ? `${previous.hash} -> ${result?.fingerprint?.hash}` : 'no previous visual baseline'
+    });
+  }
+  await chrome.storage.local.set({ [VISUAL_ASSERT_STORAGE_KEY]: result?.fingerprint });
+  const failed = assertions.filter(item => !item.passed);
+  return {
+    ok: failed.length === 0,
+    passed: failed.length === 0,
+    assertions,
+    failed,
+    fingerprint: result?.fingerprint,
+    previousFingerprint: previous
+  };
+}
+
+async function buildTargetCandidatesWithMemory(command, tab) {
+  const candidates = buildTargetCandidates(command);
+  if (command.selectorMemory === false) {
+    return candidates;
+  }
+
+  const memoryKey = selectorMemoryKey(command, tab?.url);
+  if (!memoryKey) {
+    return candidates;
+  }
+
+  const stored = await chrome.storage.local.get(SELECTOR_MEMORY_STORAGE_KEY);
+  const memory = stored[SELECTOR_MEMORY_STORAGE_KEY] && typeof stored[SELECTOR_MEMORY_STORAGE_KEY] === 'object'
+    ? stored[SELECTOR_MEMORY_STORAGE_KEY]
+    : {};
+  const entries = Array.isArray(memory[memoryKey]) ? memory[memoryKey].slice(0, 5) : [];
+  const remembered = entries
+    .filter(entry => entry?.selector || entry?.text || entry?.label)
+    .map(entry => ({
+      ...candidates[0],
+      selector: entry.selector,
+      text: entry.selector ? undefined : entry.text,
+      label: entry.label,
+      role: entry.role,
+      selectorMemoryHit: true
+    }));
+  return [...remembered, ...candidates];
+}
+
+async function rememberSelectorSuccess(command, tab, candidate, autoHealed) {
+  if (command.selectorMemory === false || !candidate || (!candidate.selector && !candidate.text && !candidate.label)) {
+    return;
+  }
+
+  const memoryKey = selectorMemoryKey(command, tab?.url);
+  if (!memoryKey) {
+    return;
+  }
+
+  const stored = await chrome.storage.local.get(SELECTOR_MEMORY_STORAGE_KEY);
+  const memory = stored[SELECTOR_MEMORY_STORAGE_KEY] && typeof stored[SELECTOR_MEMORY_STORAGE_KEY] === 'object'
+    ? stored[SELECTOR_MEMORY_STORAGE_KEY]
+    : {};
+  const current = Array.isArray(memory[memoryKey]) ? memory[memoryKey] : [];
+  const entry = {
+    selector: candidate.selector,
+    text: candidate.text,
+    label: candidate.label,
+    role: candidate.role,
+    action: command.action,
+    autoHealed: Boolean(autoHealed),
+    updatedAt: new Date().toISOString()
+  };
+  memory[memoryKey] = [entry, ...current.filter(item => item?.selector !== entry.selector || item?.text !== entry.text).slice(0, 9)];
+  await chrome.storage.local.set({ [SELECTOR_MEMORY_STORAGE_KEY]: memory });
+}
+
+function selectorMemoryKey(command, url) {
+  const identity = String(command.targetHint || command.label || command.text || command.selector || '').trim().toLowerCase();
+  if (!identity) {
+    return undefined;
+  }
+
+  let host = 'unknown-host';
+  try {
+    host = new URL(url || location.href).hostname.toLowerCase();
+  } catch {
+    host = 'unknown-host';
+  }
+  return `${host}|${command.action || 'action'}|${identity}`;
 }
 
 async function runRecordWorkflow(command) {
