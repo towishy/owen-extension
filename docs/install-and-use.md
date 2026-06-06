@@ -31,7 +31,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.12.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.13.vsix --force
 ```
 
 macOS terminal:
@@ -114,7 +114,7 @@ The local server listens on `http://127.0.0.1:17321` by default.
 3. Click **Start Server** if the setup page shows the server is stopped.
 4. Click **Copy Pairing Token**.
 5. VS Code copies the token to your clipboard without showing it on screen.
-6. In Chrome or Edge, click the Owen Capture browser extension icon.
+6. In Chrome or Edge, click the Owen Browser Bridge Agent browser extension icon.
 7. Keep `VS Code Port` as `17321`, unless you changed `owenBrowserBridge.port`.
 8. Paste the copied token into **Pairing Token**.
 9. Optionally enter an **Investigation / Case** name such as `incident-12345` when you plan to capture several tabs for the same investigation.
@@ -127,7 +127,7 @@ If you need to rotate the token, click **Regenerate and Copy Token** on the setu
 ## 5. Capture a Portal Page
 
 1. Open a page listed in **Allowed Hosts** on the setup page, for example `https://security.microsoft.com`.
-2. Click the Owen Capture browser extension icon.
+2. Click the Owen Browser Bridge Agent browser extension icon.
 3. Click **Send Current Tab**.
 4. In VS Code, run `Owen Browser Bridge: Show Latest Capture`.
 

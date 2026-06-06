@@ -11,6 +11,10 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
+## New in 0.1.13
+
+- Browser extension display name is now "Owen Browser Bridge Agent" in the extension list and popup.
+
 ## New in 0.1.12
 
 - Target inspection with `inspectTargets` ranks visual and accessibility candidates before clicking or typing.
@@ -57,7 +61,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.12.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.13.vsix --force
 ```
 
 macOS terminal:
@@ -67,7 +71,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.12.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.13.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -117,7 +121,7 @@ If the token ever needs to be replaced, click **Regenerate and Copy Token** and 
 ### 3. Paste the token into the browser extension
 
 1. Open Chrome or Edge.
-2. Click the **Owen Capture** browser extension icon.
+2. Click the **Owen Browser Bridge Agent** browser extension icon.
 3. Confirm `VS Code Port` is `17321` unless you changed the VS Code setting.
 4. Paste the copied token into **Pairing Token**.
 5. Optionally enter an **Investigation / Case** name such as `incident-12345` to group multiple tab captures together.
@@ -128,7 +132,7 @@ If the token ever needs to be replaced, click **Regenerate and Copy Token** and 
 ### 4. Send a browser page to VS Code
 
 1. Open a page listed in **Allowed Hosts** on the setup page, such as `https://security.microsoft.com` or `https://portal.azure.com`.
-2. Click the **Owen Capture** browser extension icon.
+2. Click the **Owen Browser Bridge Agent** browser extension icon.
 3. Click **Send Current Tab**.
 4. The popup should show `Sent`.
 5. In VS Code, run `Owen Browser Bridge: Show Latest Capture` to open the saved Markdown note.

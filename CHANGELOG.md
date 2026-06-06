@@ -6,6 +6,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-06-06
+
+- Renamed the browser extension UI label from "Owen Capture" to "Owen Browser Bridge Agent".
+
 ## [0.1.12] - 2026-06-06
 
 - Fixed `readPage` and capture snapshots after adding capture quality scoring by keeping injected quality scoring logic inside the page context.
