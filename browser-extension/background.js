@@ -251,7 +251,7 @@ async function executeSingleAction(command, allowedHosts) {
   if (action === 'openInNewTab') {
     assertAllowedUrl(command.url, allowedHosts);
     const created = await chrome.tabs.create({ url: command.url, active: true });
-    if (!created?.id) {
+    if (!hasTabId(created)) {
       throw new Error('Failed to create a new tab.');
     }
 
@@ -456,7 +456,7 @@ async function runMultiTabCrawl(command, allowedHosts) {
   for (const href of targets) {
     assertAllowedUrl(href, allowedHosts);
     const created = await chrome.tabs.create({ url: href, active: false });
-    if (!created?.id) {
+    if (!hasTabId(created)) {
       continue;
     }
     await waitForTabComplete(created.id, command.timeoutMs).catch(() => undefined);
@@ -1206,26 +1206,30 @@ function buildTargetIntent(command) {
 
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id) {
+  if (hasTabId(tab)) {
     return tab;
   }
 
   const [lastFocusedTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (lastFocusedTab?.id) {
+  if (hasTabId(lastFocusedTab)) {
     return lastFocusedTab;
   }
 
   const activeTabs = await chrome.tabs.query({ active: true });
-  const fallbackTab = activeTabs.find(candidate => candidate.id && candidate.windowId !== chrome.windows.WINDOW_ID_NONE);
-  if (fallbackTab?.id) {
+  const fallbackTab = activeTabs.find(candidate => hasTabId(candidate) && candidate.windowId !== chrome.windows.WINDOW_ID_NONE);
+  if (hasTabId(fallbackTab)) {
     return fallbackTab;
   }
 
-  if (!tab?.id) {
+  if (!hasTabId(tab)) {
     throw new Error('No active browser tab is available.');
   }
 
   return tab;
+}
+
+function hasTabId(tab) {
+  return Number.isInteger(tab?.id);
 }
 
 async function getBrowserSessionId() {
@@ -1263,7 +1267,7 @@ async function rememberBrowserState(browserSession) {
 async function getTabByIndex(targetTabIndex) {
   const tabs = await chrome.tabs.query({ currentWindow: true });
   const target = tabs.find(tab => tab.index === targetTabIndex);
-  if (!target?.id) {
+  if (!hasTabId(target)) {
     throw new Error(`Tab index not found: ${targetTabIndex}`);
   }
 
@@ -1288,7 +1292,7 @@ async function captureCurrentTab() {
   }
 
   const tab = await getActiveTab();
-  if (!tab?.id || !tab.url) {
+  if (!hasTabId(tab) || !tab.url) {
     throw new Error('No active browser tab is available.');
   }
 

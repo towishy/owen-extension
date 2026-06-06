@@ -6,6 +6,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-06-06
+
+- Fixed paired browser tab detection when Chrome or Edge reports a valid tab id of `0`.
+
 ## [0.1.10] - 2026-06-06
 
 - Added `inspectTargets` for ranked visual and accessibility target inspection before browser actions.
