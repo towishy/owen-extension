@@ -45,7 +45,7 @@ In GitHub Copilot Chat, use the contributed tool reference names:
 
 Some agent hosts may expose the underlying tool ids such as `browser_act` or `get_browser_state`. If `#browserAct` or `#getBrowserState` is unavailable, try the snake_case id or inspect the available tool list.
 
-`#browserAct { "action": "readPage" }` and `#getBrowserState` return `screenSummary`, a compact structured page state for agent planning. Prefer it over raw visible text when choosing selectors or deciding the next action. It includes headings, landmarks, interactables, form fields, tables, viewport, and a text sample.
+`#browserAct { "action": "readPage" }` and `#getBrowserState` return `screenSummary`, a compact structured page state for agent planning. Prefer it over raw visible text when choosing selectors or deciding the next action. It includes headings, landmarks, interactables, form fields, tables, viewport, a text sample, and capture quality findings.
 
 ## Direct HTTP Mode
 
@@ -119,6 +119,7 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `switchTab` | Activate tab by index | `targetTabIndex` | Success | `#browserAct { "action": "switchTab", "targetTabIndex": 0 }` |
 | `closeTab` | Close tab | `confirmDangerous: true` | Success | `#browserAct { "action": "closeTab", "confirmDangerous": true }` |
 | `listInteractables` | Inspect clickable/focusable UI | none | Success | `#browserAct { "action": "listInteractables", "captureAfter": false }` |
+| `inspectTargets` | Rank visual/accessibility target candidates | `targetHint`, `text`, `label`, `role` | New | `#browserAct { "action": "inspectTargets", "targetHint": "Evidence tab", "captureAfter": false }` |
 | `runWorkflow` | Execute multiple steps | `steps`, `preset` | Fails: unserializable script argument | `#browserAct { "action": "runWorkflow", "steps": [{ "action": "readPage" }, { "action": "click", "selector": "#click-target" }] }` |
 | `journeyCapture` | Visit URL list and collect summaries | `urls`, `maxPages`, `extractSelectors` | Success | `#browserAct { "action": "journeyCapture", "urls": ["http://127.0.0.1:18080/page1", "http://127.0.0.1:18080/page2"], "maxPages": 2, "extractSelectors": { "ready": "#ready-text" }, "acknowledgement": "CONFIRM_BROWSER_ACTION" }` |
 | `paginateCapture` | Follow next-page controls | `nextSelector`, `nextText`, `maxPages` | Success | `#browserAct { "action": "paginateCapture", "nextSelector": "#next-page", "maxPages": 2, "extractSelectors": { "ready": "#ready-text" } }` |
@@ -228,6 +229,20 @@ Follow these rules every time:
 ```text
 #browserAct { "action": "click", "text": "Evidence", "fallbackTexts": ["Assets", "Entities"], "retries": 2, "captureAfter": true, "investigationName": "incident-12345" } open the most relevant investigation tab and report the result.
 ```
+
+### Inspect And Auto-Heal Targets
+
+```text
+#browserAct { "action": "inspectTargets", "targetHint": "Evidence tab", "captureAfter": false } rank likely browser targets before choosing a click selector.
+```
+
+```text
+#browserAct { "action": "click", "targetHint": "Evidence tab", "autoHeal": true, "captureAfter": true, "investigationName": "incident-12345" } click the best matching target and report whether auto-healing was used.
+```
+
+### Check Capture Quality
+
+After `readPage` or `capture`, inspect `screenSummary.captureQuality`. Treat `level=poor`, `auth-page-likely`, `loading-indicator-visible`, or `low-visible-text` as evidence gaps and wait, re-capture, or ask the operator to finish sign-in before analysis.
 
 ### Extract a Table
 

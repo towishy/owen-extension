@@ -11,13 +11,11 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
-## New in 0.1.9
+## New in 0.1.10
 
-- URL traversal capture with `journeyCapture` (visit URL lists and collect page-by-page evidence).
-- Pagination capture with `paginateCapture` (follow next page controls and collect multi-page summaries).
-- Structured field extraction with `extractSelectors` for incident-centric key data capture.
-- Authentication-aware pause/resume using `resumeAfterAuth`.
-- Copilot prompt flow for auth-gated pages: finish sign-in in browser, then continue from chat.
+- Target inspection with `inspectTargets` ranks visual and accessibility candidates before clicking or typing.
+- Auto-healing target actions with `targetHint` and `autoHeal` retry likely candidates when selectors or text fail.
+- Capture quality scoring reports auth, loading, and low-evidence states in `screenSummary.captureQuality`.
 
 ## What It Captures
 
@@ -25,6 +23,7 @@ The initial target is Defender, Entra, Azure portal, and similar security invest
 - Visible page text
 - Selected text
 - Page headings, visible buttons/links, viewport data, and meta tags
+- Capture quality score and findings for auth/loading/low-evidence states
 - Optional HTML snapshot
 - Optional visible-tab PNG screenshot
 
@@ -56,7 +55,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.9.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.10.vsix --force
 ```
 
 macOS terminal:
@@ -66,7 +65,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.9.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.10.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -188,11 +187,11 @@ For paired browser control on allowed hosts:
 #browserAct { "action": "click", "text": "Evidence", "investigationName": "incident-12345" } Defender 인시던트의 Evidence 탭을 열고 결과 화면을 캡처해줘.
 ```
 
-Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, and text sample. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
+Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, text sample, and capture quality. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` supports `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, checkpoint rollback, manual review gates, and policy checks.
+`#browserAct` supports `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `targetHint`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, checkpoint rollback, manual review gates, and policy checks.
 
 `ocrSnapshot` returns screenshot plus DOM text hints. True OCR engine embedding is not included in this runtime.
 

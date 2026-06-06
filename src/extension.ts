@@ -113,6 +113,8 @@ type BrowserStepInput = {
 	retries?: number;
 	fallbackSelectors?: string[];
 	fallbackTexts?: string[];
+	autoHeal?: boolean;
+	targetHint?: string;
 	targetTabIndex?: number;
 	confirmDangerous?: boolean;
 	captureAfter?: boolean;
@@ -164,6 +166,7 @@ type BrowserAction =
 	| 'switchTab'
 	| 'closeTab'
 	| 'listInteractables'
+	| 'inspectTargets'
 	| 'journeyCapture'
 	| 'paginateCapture'
 	| 'smartFormFill'
@@ -227,6 +230,8 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	retries: number;
 	fallbackSelectors: string[];
 	fallbackTexts: string[];
+	autoHeal: boolean;
+	targetHint?: string;
 	targetTabIndex?: number;
 	confirmDangerous: boolean;
 	steps: BrowserStepInput[];
@@ -603,7 +608,7 @@ async function invokeBrowserAction(context: vscode.ExtensionContext, input: Brow
 const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'readPage', 'capture', 'click', 'type', 'navigate', 'waitForText', 'wait', 'scroll', 'hover', 'keyPress',
 	'selectOption', 'clearInput', 'back', 'forward', 'reload', 'openInNewTab', 'switchTab', 'closeTab',
-	'listInteractables', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
+	'listInteractables', 'inspectTargets', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
 	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
 	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
 	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard',
@@ -697,12 +702,14 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		retries,
 		fallbackSelectors: sanitizeStringList(input.fallbackSelectors),
 		fallbackTexts: sanitizeStringList(input.fallbackTexts),
+		autoHeal: Boolean(input.autoHeal || input.targetHint),
+		targetHint: input.targetHint,
 		targetTabIndex: input.targetTabIndex,
 		confirmDangerous: Boolean(input.confirmDangerous),
 		steps: [...presetSteps, ...workflowSteps],
 		preset: input.preset,
 		timeoutMs,
-		captureAfter: input.captureAfter ?? (action !== 'listInteractables'),
+		captureAfter: input.captureAfter ?? (action !== 'listInteractables' && action !== 'inspectTargets'),
 		includeScreenshot: input.includeScreenshot ?? true,
 		includeHtml: input.includeHtml ?? false,
 		investigationName: input.investigationName,
@@ -796,7 +803,7 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 		}
 	}
 
-	if ((action === 'click' || action === 'hover') && !step.selector && !step.text && !step.label) {
+	if ((action === 'click' || action === 'hover') && !step.selector && !step.text && !step.label && !step.targetHint) {
 		throw new Error(`browserAct ${action} requires selector, text, or label.`);
 	}
 
@@ -804,7 +811,7 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 		throw new Error('browserAct type requires value.');
 	}
 
-	if (action === 'type' && !step.selector && !step.text && !step.label) {
+	if (action === 'type' && !step.selector && !step.text && !step.label && !step.targetHint) {
 		throw new Error('browserAct type requires selector, text, or label.');
 	}
 

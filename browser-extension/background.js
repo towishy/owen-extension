@@ -317,6 +317,15 @@ async function executeSingleAction(command, allowedHosts) {
     return { ok: true, page: pageSnapshot, browserSession };
   }
 
+  if (action === 'inspectTargets') {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: inspectTargetsOnPage,
+      args: [buildTargetIntent(command)]
+    });
+    return result ?? { ok: true, rankedTargets: [] };
+  }
+
   const targets = buildTargetCandidates(command);
   const maxRetries = Number.isInteger(command.retries) ? command.retries : 0;
   let lastError = 'Action failed.';
@@ -330,6 +339,39 @@ async function executeSingleAction(command, allowedHosts) {
       });
       if (!result?.error) {
         return result ?? { ok: true };
+      }
+
+      lastError = result.error;
+    }
+  }
+
+  if (command.autoHeal) {
+    const [{ result: inspection }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: inspectTargetsOnPage,
+      args: [buildTargetIntent(command)]
+    });
+    const healedTargets = Array.isArray(inspection?.rankedTargets)
+      ? inspection.rankedTargets
+        .filter(target => target.selectorHint || target.text || target.accessibleName)
+        .slice(0, 5)
+        .map(target => ({
+          selector: target.selectorHint,
+          text: target.selectorHint ? undefined : (target.text || target.accessibleName),
+          label: target.accessibleName,
+          role: target.role,
+          index: 0
+        }))
+      : [];
+
+    for (const candidate of healedTargets) {
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: runDomCommand,
+        args: [{ ...command, ...candidate }]
+      });
+      if (!result?.error) {
+        return { ...(result ?? { ok: true }), autoHealed: true, target: candidate, inspection };
       }
 
       lastError = result.error;
@@ -1151,6 +1193,17 @@ function buildTargetCandidates(command) {
   return candidates;
 }
 
+function buildTargetIntent(command) {
+  return {
+    selector: command.selector,
+    text: command.text,
+    label: command.label,
+    role: command.role,
+    targetHint: command.targetHint,
+    action: command.action
+  };
+}
+
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id) {
@@ -1812,10 +1865,21 @@ function collectPageSnapshot(includeHtml) {
       label: normalize(element.getAttribute('aria-label') || element.getAttribute('title') || ''),
       selectorHint: selectorHint(element)
     }));
+  const pageText = normalize(document.body?.innerText ?? '');
+  const captureQuality = scoreCaptureQuality({
+    visibleText: pageText,
+    headings,
+    interactables,
+    formFields,
+    tables,
+    hasHtml: Boolean(includeHtml),
+    authLikely: Boolean(document.querySelector('input[type="password"]')) || /sign in|signin|로그인|인증/i.test(pageText.slice(0, 3000)),
+    loadingLikely: Boolean(Array.from(document.querySelectorAll('[aria-busy="true"],[role="progressbar"],.spinner,.loading')).find(isVisible))
+  });
   const screenSummary = {
     url: location.href,
     title: document.title,
-    textSample: normalize(document.body?.innerText ?? '').slice(0, 4000),
+    textSample: pageText.slice(0, 4000),
     counts: {
       headings: headings.length,
       interactables: interactables.length,
@@ -1835,7 +1899,8 @@ function collectPageSnapshot(includeHtml) {
     landmarks,
     interactables,
     formFields,
-    tables
+    tables,
+    captureQuality
   };
 
   return {
@@ -1855,8 +1920,145 @@ function collectPageSnapshot(includeHtml) {
       },
       headings,
       buttons,
+      captureQuality,
       meta: metadata
     }
+  };
+}
+
+function inspectTargetsOnPage(intent) {
+  const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const normalizeLower = value => normalize(value).toLowerCase();
+  const isVisible = element => {
+    if (!element) {
+      return false;
+    }
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+      return false;
+    }
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+  const selectorHint = element => {
+    if (element.id) {
+      return `#${CSS.escape(element.id)}`;
+    }
+    const testId = element.getAttribute('data-testid') || element.getAttribute('data-test-id') || element.getAttribute('data-test');
+    if (testId) {
+      return `[data-testid="${CSS.escape(testId)}"]`;
+    }
+    const name = element.getAttribute('name');
+    if (name) {
+      return `${element.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
+    }
+    const ariaLabel = element.getAttribute('aria-label');
+    if (ariaLabel) {
+      return `${element.tagName.toLowerCase()}[aria-label="${CSS.escape(ariaLabel)}"]`;
+    }
+    return undefined;
+  };
+  const getAccessibleName = element => normalize(
+    element.getAttribute('aria-label') ||
+    element.getAttribute('title') ||
+    element.labels?.[0]?.innerText ||
+    element.innerText ||
+    element.value ||
+    ''
+  );
+  const needle = normalizeLower(intent?.targetHint || intent?.label || intent?.text || intent?.selector || '');
+  const wantedRole = normalizeLower(intent?.role || '');
+  const nodes = Array.from(document.querySelectorAll('button,[role="button"],[role="tab"],a[href],input,textarea,select,[tabindex]')).filter(isVisible);
+  const rankedTargets = nodes.map((element, index) => {
+    const rect = element.getBoundingClientRect();
+    const role = element.getAttribute('role') || (element.tagName.toLowerCase() === 'button' ? 'button' : undefined);
+    const text = normalize(element.innerText || element.value || '');
+    const accessibleName = getAccessibleName(element);
+    const haystack = normalizeLower(`${text} ${accessibleName} ${element.id || ''} ${element.className || ''} ${selectorHint(element) || ''}`);
+    let score = 20;
+    const reasons = [];
+    if (needle && haystack.includes(needle)) {
+      score += 45;
+      reasons.push('intent-text-match');
+    }
+    if (wantedRole && normalizeLower(role || '') === wantedRole) {
+      score += 20;
+      reasons.push('role-match');
+    }
+    if (selectorHint(element)) {
+      score += 10;
+      reasons.push('stable-selector-hint');
+    }
+    if (rect.width >= 16 && rect.height >= 16) {
+      score += 8;
+      reasons.push('usable-bounds');
+    }
+    if (element.disabled || element.getAttribute('aria-disabled') === 'true') {
+      score -= 40;
+      reasons.push('disabled');
+    }
+
+    return {
+      index,
+      score: Math.max(0, Math.min(100, score)),
+      reasons,
+      tag: element.tagName.toLowerCase(),
+      role,
+      type: element.getAttribute('type') || undefined,
+      text: text.slice(0, 180),
+      accessibleName: accessibleName.slice(0, 180),
+      selectorHint: selectorHint(element),
+      disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+      bounds: {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      }
+    };
+  })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 25);
+
+  return { ok: true, intent, rankedTargets };
+}
+
+function scoreCaptureQuality(input) {
+  const findings = [];
+  let score = 100;
+  if (input.authLikely) {
+    score -= 35;
+    findings.push('auth-page-likely');
+  }
+  if (input.loadingLikely) {
+    score -= 25;
+    findings.push('loading-indicator-visible');
+  }
+  if (input.visibleText.length < 120) {
+    score -= 20;
+    findings.push('low-visible-text');
+  }
+  if (input.headings.length === 0) {
+    score -= 10;
+    findings.push('no-headings');
+  }
+  if (input.interactables.length === 0) {
+    score -= 10;
+    findings.push('no-interactables');
+  }
+  if (input.tables.some(table => table.rowCount === 0)) {
+    score -= 5;
+    findings.push('empty-table-detected');
+  }
+  if (!input.hasHtml) {
+    findings.push('html-snapshot-disabled');
+  }
+
+  const normalizedScore = Math.max(0, Math.min(100, score));
+  return {
+    score: normalizedScore,
+    level: normalizedScore >= 80 ? 'good' : normalizedScore >= 55 ? 'partial' : 'poor',
+    findings
   };
 }
 

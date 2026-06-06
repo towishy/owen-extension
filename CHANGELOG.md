@@ -6,6 +6,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-06-06
+
+- Added `inspectTargets` for ranked visual and accessibility target inspection before browser actions.
+- Added `targetHint` and `autoHeal` support so failed DOM target actions can retry likely visual/accessibility candidates.
+- Added capture quality scoring in `screenSummary.captureQuality` for auth, loading, and low-evidence capture states.
+
 ## [0.1.9] - 2026-06-05
 
 - Added OS-specific capture directory settings for Windows and macOS, including setup page fields for separate directory paths.
