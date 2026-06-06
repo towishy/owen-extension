@@ -11,6 +11,13 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
+## New in 0.1.24
+
+- Added `runScenarioTemplate` for reusable browser automation scenario templates.
+- Added 10 built-in generic templates for readiness, evidence review, guarded actions, tab/auth flows, form fill, downloads, recovery, drilldown, handoff, and browser jobs.
+- Added Microsoft Security templates for Defender XDR incident triage, Sentinel log collection, Entra risky sign-in review, MDE/MDO/MDI/Purview/Defender for Cloud evidence capture, and security portal handoff.
+- Added custom `scenarioTemplates` support so teams can pass local template registries with `params`.
+
 ## New in 0.1.23
 
 - Added `tabOrchestrator` to classify and manage browser tabs by logical role.
@@ -123,7 +130,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.23.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.24.vsix --force
 ```
 
 macOS terminal:
@@ -133,7 +140,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.23.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.24.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -257,9 +264,17 @@ For paired browser control on allowed hosts:
 
 Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, text sample, and capture quality. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are also available: `wait`, `waitPreset`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `visualAssert`, `accessibilitySnapshot`, `mapForm`, `watchPageChanges`, `highlightEvidence`, `planAndRun`, `evidenceClaimCheck`, `tableWatchAndDiff`, `browserRunBundle`, `safeActionPreview`, `stableTargetProfile`, `guidedDrilldown`, `evidenceCompletenessCheck`, `failureExplainer`, `waitProfiler`, `automationHealthScore`, `sensitiveActionGuard`, `tabOrchestrator`, `popupGuard`, `returnToTab`, `tabRunSummary`, `buildEvidencePack`, `buildNavigationGraph`, `assertPageContract`, `createHandoff`, `selectorHealthReport`, `captureReviewQueue`, `startBrowserJob`, `getBrowserJob`, `cancelBrowserJob`, `recordWorkflow`, `replayWorkflow`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are also available: `wait`, `waitPreset`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `visualAssert`, `accessibilitySnapshot`, `mapForm`, `watchPageChanges`, `highlightEvidence`, `planAndRun`, `evidenceClaimCheck`, `tableWatchAndDiff`, `browserRunBundle`, `safeActionPreview`, `stableTargetProfile`, `guidedDrilldown`, `evidenceCompletenessCheck`, `failureExplainer`, `waitProfiler`, `automationHealthScore`, `sensitiveActionGuard`, `tabOrchestrator`, `popupGuard`, `returnToTab`, `tabRunSummary`, `buildEvidencePack`, `buildNavigationGraph`, `assertPageContract`, `createHandoff`, `selectorHealthReport`, `captureReviewQueue`, `startBrowserJob`, `getBrowserJob`, `cancelBrowserJob`, `recordWorkflow`, `replayWorkflow`, `runScenarioTemplate`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` supports `preset`, `steps`, `goal`, `claim`, `requiredClaims`, `retries`, `retryProfile`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `selectorMemory`, `targetHint`, `targetScope`, `frameDepth`, `captureBeforeAfter`, `assertText`, `assertNoText`, `assertSelector`, `assertNotSelector`, `assertScreenshotChanged`, `watchDurationMs`, `highlightSelectors`, `highlightText`, `waitPreset`, `waitCandidates`, `contractName`, `contractSelectors`, `contractTexts`, `captureGroup`, `jobName`, `tabRoles`, `expectedTabs`, `returnToRole`, `closeExtraTabs`, `onUnexpectedTab`, `keyColumns`, `detailSelector`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `macroName`, `params`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, preview actions, profile stable targets, orchestrate browser tabs and popups, drill into matching rows, capture element/region evidence, form automation, conditional branching, runtime snapshots, gap detection, failure explanation, wait profiling, automation health scoring, sensitive action guarding, replay export, network traces, table extraction, table diffing, claim checking, evidence completeness checks, checkpoint rollback, manual review gates, policy checks, visual assertions, page watching, evidence highlighting, evidence pack building, navigation graphing, browser run bundling, contract checks, handoff reports, selector health reports, and reusable macro playback.
+`#browserAct` supports `preset`, `steps`, `goal`, `claim`, `requiredClaims`, `retries`, `retryProfile`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `selectorMemory`, `targetHint`, `targetScope`, `frameDepth`, `captureBeforeAfter`, `assertText`, `assertNoText`, `assertSelector`, `assertNotSelector`, `assertScreenshotChanged`, `watchDurationMs`, `highlightSelectors`, `highlightText`, `waitPreset`, `waitCandidates`, `contractName`, `contractSelectors`, `contractTexts`, `captureGroup`, `jobName`, `scenarioName`, `scenarioTemplates`, `tabRoles`, `expectedTabs`, `returnToRole`, `closeExtraTabs`, `onUnexpectedTab`, `keyColumns`, `detailSelector`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `macroName`, `params`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, preview actions, profile stable targets, orchestrate browser tabs and popups, drill into matching rows, capture element/region evidence, form automation, conditional branching, runtime snapshots, gap detection, failure explanation, wait profiling, automation health scoring, sensitive action guarding, replay export, network traces, table extraction, table diffing, claim checking, evidence completeness checks, checkpoint rollback, manual review gates, policy checks, visual assertions, page watching, evidence highlighting, evidence pack building, navigation graphing, browser run bundling, contract checks, handoff reports, selector health reports, reusable scenario templates, and reusable macro playback.
+
+Example: run scenario templates
+
+```text
+#browserAct { "action": "runScenarioTemplate", "scenarioName": "portalReadinessCheck", "params": { "contractName": "genericPortalReady" }, "captureAfter": false } check whether the current portal page is ready for automation.
+#browserAct { "action": "runScenarioTemplate", "scenarioName": "defenderXdrIncidentTriage", "captureGroup": "defender-incident-12345", "params": { "alertsTableSelector": "table", "summarySelector": "main" }, "captureAfter": false } collect Defender XDR incident evidence and prepare a handoff.
+#browserAct { "action": "runScenarioTemplate", "scenarioName": "sentinelLogCollection", "captureGroup": "sentinel-log-case-001", "tableSelector": "table", "captureAfter": false } collect Sentinel query result evidence.
+```
 
 Example: manage tabs and popups
 

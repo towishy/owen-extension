@@ -123,6 +123,7 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `captureElement` | Capture screenshot clipped to one element | `selector` or `targetHint`, `regionPadding` | New | `#browserAct { "action": "captureElement", "selector": "#event-card", "regionPadding": 8, "captureAfter": true }` |
 | `captureRegion` | Capture screenshot clipped to explicit rectangle | `regionX`, `regionY`, `regionWidth`, `regionHeight` | New | `#browserAct { "action": "captureRegion", "regionX": 320, "regionY": 180, "regionWidth": 760, "regionHeight": 420, "captureAfter": true }` |
 | `runWorkflow` | Execute multiple steps | `steps`, `preset` | Fails: unserializable script argument | `#browserAct { "action": "runWorkflow", "steps": [{ "action": "readPage" }, { "action": "click", "selector": "#click-target" }] }` |
+| `runScenarioTemplate` | Execute a built-in or custom scenario template | `scenarioName`, `params`, `scenarioTemplates` | New | `#browserAct { "action": "runScenarioTemplate", "scenarioName": "portalReadinessCheck", "captureAfter": false }` |
 | `journeyCapture` | Visit URL list and collect summaries | `urls`, `maxPages`, `extractSelectors` | Success | `#browserAct { "action": "journeyCapture", "urls": ["http://127.0.0.1:18080/page1", "http://127.0.0.1:18080/page2"], "maxPages": 2, "extractSelectors": { "ready": "#ready-text" }, "acknowledgement": "CONFIRM_BROWSER_ACTION" }` |
 | `paginateCapture` | Follow next-page controls | `nextSelector`, `nextText`, `maxPages` | Success | `#browserAct { "action": "paginateCapture", "nextSelector": "#next-page", "maxPages": 2, "extractSelectors": { "ready": "#ready-text" } }` |
 | `smartFormFill` | Fill form fields by label/name/placeholder | `formFields`, `submitSelector`, `submitText` | Success | `#browserAct { "action": "smartFormFill", "formFields": { "Name": "Smart Fill", "Notes": "Smart notes" }, "submitSelector": "#submit-form" }` |
@@ -208,7 +209,9 @@ Use these inputs with `#browserAct` for higher reliability on modern web apps:
 | `selectorMemory` | Enables or disables host/intent selector memory reuse |
 | `captureBeforeAfter` | Adds lightweight before/after DOM diff metadata |
 | `macroName` | Macro identifier for `recordWorkflow` and `replayWorkflow` |
-| `params` | Template values for replay (`{{key}}`) |
+| `params` | Template values for replay and scenario templates (`{{key}}`) |
+| `scenarioName` | Built-in or custom scenario template name for `runScenarioTemplate` |
+| `scenarioTemplates` | Optional custom template registry with defaults and steps |
 | `goal` | Natural-language goal for `planAndRun` |
 | `claim` | Report statement checked by `evidenceClaimCheck` |
 | `requiredClaims` | Required claim/category list for `evidenceCompletenessCheck` |
@@ -269,6 +272,54 @@ New actions:
 | `startBrowserJob` / `getBrowserJob` / `cancelBrowserJob` | Manage a named synchronous job summary for step bundles | `jobName`, `steps` |
 | `recordWorkflow` | Save reusable workflow steps in browser local storage | `macroName`, `steps` |
 | `replayWorkflow` | Replay a saved workflow with optional template parameters | `macroName`, `params`, `captureBeforeAfter` |
+| `runScenarioTemplate` | Run a reusable browser scenario from generic or Microsoft Security template registries | `scenarioName`, `params`, `scenarioTemplates` |
+
+## Scenario Templates
+
+Use `runScenarioTemplate` when the task is a repeatable browser scenario rather than a single action. Built-in templates render `{{key}}` placeholders from `params` and top-level inputs such as `captureGroup`, `tableSelector`, `requiredClaims`, `tabRoles`, and `actionTemplate`.
+
+```text
+#browserAct { "action": "runScenarioTemplate", "scenarioName": "portalReadinessCheck", "params": { "contractName": "genericPortalReady" }, "captureAfter": false }
+#browserAct { "action": "runScenarioTemplate", "scenarioName": "evidenceTableReview", "tableSelector": "#data-table", "claim": "Alpha is Open", "captureGroup": "case-001" }
+```
+
+| Template | Purpose | Main actions |
+|---|---|---|
+| `portalReadinessCheck` | Check whether a portal page is ready for automation | `automationHealthScore`, `waitPreset`, `assertPageContract`, `accessibilitySnapshot` |
+| `evidenceTableReview` | Extract and verify table evidence | `tableExtract`, `highlightEvidence`, `evidenceClaimCheck`, `buildEvidencePack` |
+| `safeDestructiveAction` | Preview and gate potentially destructive actions | `policyGuard`, `sensitiveActionGuard`, `safeActionPreview`, `humanReviewGate` |
+| `multiTabAuthFlow` | Manage auth, callback, popup, and main tabs | `tabRunSummary`, `popupGuard`, `tabOrchestrator`, `returnToTab` |
+| `formFillAndVerify` | Map, fill, watch, and assert form outcomes | `mapForm`, `smartFormFill`, `watchPageChanges`, `visualAssert` |
+| `downloadEvidenceCapture` | Capture and hash download evidence | `highlightEvidence`, `safeDownloadAndHash`, `browserRunBundle` |
+| `flakyUiRecovery` | Explain failures and choose better waits or targets | `failureExplainer`, `waitProfiler`, `stableTargetProfile`, `safeActionPreview` |
+| `guidedDrilldownEvidence` | Open row/list details and check evidence coverage | `tableExtract`, `guidedDrilldown`, `highlightEvidence`, `evidenceCompletenessCheck` |
+| `operatorHandoff` | Package state for a human operator | `createHandoff`, `buildNavigationGraph`, `browserRunBundle`, `captureReviewQueue` |
+| `backgroundJobWorkflow` | Run a named step bundle as a browser job | `startBrowserJob`, `getBrowserJob`, `browserRunBundle` |
+
+## Microsoft Security Scenario Templates
+
+These templates are read-oriented by default. Remediation-like actions are guarded with preview, policy, sensitive-action, or handoff steps instead of direct clicks.
+
+```text
+#browserAct { "action": "runScenarioTemplate", "scenarioName": "defenderXdrIncidentTriage", "captureGroup": "defender-incident-12345", "params": { "alertsTableSelector": "table", "summarySelector": "main" }, "captureAfter": false }
+#browserAct { "action": "runScenarioTemplate", "scenarioName": "sentinelLogCollection", "captureGroup": "sentinel-log-case-001", "tableSelector": "table", "captureAfter": false }
+```
+
+| Template | Product | Purpose |
+|---|---|---|
+| `defenderXdrIncidentTriage` | Microsoft Defender XDR | Incident summary, severity, related alerts, entities, timeline evidence, and handoff pack |
+| `defenderXdrAlertEvidenceReview` | Microsoft Defender XDR | Per-alert detection evidence and impact review |
+| `sentinelLogCollection` | Microsoft Sentinel | KQL result table and query-context evidence capture |
+| `sentinelIncidentCorrelation` | Microsoft Sentinel | Correlate Sentinel incident evidence with visible log results |
+| `entraRiskySignInReview` | Microsoft Entra ID | Risky sign-in evidence with guarded remediation review |
+| `entraAuditTrailCapture` | Microsoft Entra ID | Audit/sign-in log filter and table evidence capture |
+| `mdeDeviceTimelineReview` | Defender for Endpoint | Device timeline event and detail evidence review |
+| `mdeAdvancedHuntingCollection` | Defender XDR Advanced Hunting | Advanced Hunting result collection and claim check |
+| `mdoEmailThreatReview` | Defender for Office 365 | Email threat, URL, attachment, and delivery evidence review |
+| `defenderForIdentityLateralMovementReview` | Defender for Identity | Account and host evidence for lateral movement alerts |
+| `defenderForCloudPostureReview` | Defender for Cloud | Recommendation, resource, severity, and compliance posture evidence |
+| `purviewDlpIncidentReview` | Microsoft Purview | DLP alert, policy, and sensitive information evidence capture |
+| `securityPortalHandoffBundle` | Microsoft Security portals | Cross-product evidence pack, navigation graph, and review queue handoff |
 
 Prefer `accessibilitySnapshot` before uncertain clicks and `mapForm` before `smartFormFill`. Use `watchPageChanges` after manual sign-in, navigation, or portal blade changes when the page may still be settling. Use `highlightEvidence` for screenshots that need to show exactly which table, panel, or status marker supports the conclusion.
 

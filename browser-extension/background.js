@@ -400,6 +400,10 @@ async function executeSingleAction(command, allowedHosts) {
     return runReplayWorkflow(command, allowedHosts);
   }
 
+  if (action === 'runScenarioTemplate') {
+    return runScenarioTemplate(command, allowedHosts);
+  }
+
   if (action === 'navigate') {
     assertAllowedUrl(command.url, allowedHosts);
     const tab = await getActiveTab();
@@ -2689,6 +2693,527 @@ async function runReplayWorkflow(command, allowedHosts) {
   }
 
   return { ok: true, macroName, executed: results.length, steps: results };
+}
+
+const SCENARIO_TEMPLATE_REGISTRY = {
+  portalReadinessCheck: {
+    category: 'generic',
+    description: 'Check whether a portal page is ready for browser automation.',
+    defaults: {
+      waitPreset: 'genericPortalReady',
+      contractName: 'genericPortalReady',
+      contractSelectors: ['main'],
+      contractTexts: []
+    },
+    steps: [
+      { action: 'automationHealthScore', captureAfter: false },
+      { action: 'waitPreset', waitPreset: '{{waitPreset}}', captureAfter: false },
+      { action: 'assertPageContract', contractName: '{{contractName}}', contractSelectors: '{{contractSelectors}}', contractTexts: '{{contractTexts}}' },
+      { action: 'accessibilitySnapshot', maxEntries: 80, captureAfter: false }
+    ]
+  },
+  evidenceTableReview: {
+    category: 'generic',
+    description: 'Collect and verify table-based evidence.',
+    defaults: {
+      tableSelector: 'table',
+      claim: 'visible table evidence is present',
+      captureGroup: 'evidence-table-review',
+      highlightSelectors: ['table']
+    },
+    steps: [
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', headerMode: 'auto', outputFormat: 'json' },
+      { action: 'highlightEvidence', highlightSelectors: '{{highlightSelectors}}', includeScreenshot: true },
+      { action: 'evidenceClaimCheck', claim: '{{claim}}', tableSelector: '{{tableSelector}}' },
+      { action: 'buildEvidencePack', captureGroup: '{{captureGroup}}', captureAfter: false }
+    ]
+  },
+  safeDestructiveAction: {
+    category: 'generic',
+    description: 'Preview and gate a potentially destructive action without executing it.',
+    defaults: {
+      actionTemplate: { action: 'click', targetHint: 'Delete, disable, approve, or remove action' },
+      targetHint: 'sensitive action',
+      reviewPrompt: 'Review the sensitive browser action before any execution.',
+      approvalKeyword: 'APPROVE_SCENARIO'
+    },
+    steps: [
+      { action: 'policyGuard', policyProfile: 'standard', onViolation: 'block', actionTemplate: '{{actionTemplate}}' },
+      { action: 'sensitiveActionGuard', onViolation: 'block', actionTemplate: '{{actionTemplate}}', targetHint: '{{targetHint}}' },
+      { action: 'safeActionPreview', actionTemplate: '{{actionTemplate}}', targetHint: '{{targetHint}}' },
+      { action: 'humanReviewGate', reviewPrompt: '{{reviewPrompt}}', approvalKeyword: '{{approvalKeyword}}', value: '{{approvalKeyword}}' }
+    ]
+  },
+  multiTabAuthFlow: {
+    category: 'generic',
+    description: 'Classify tabs, detect popups, and return to the main tab.',
+    defaults: {
+      tabRoles: { main: [''], auth: ['login', 'oauth', 'signin'], callback: ['redirect', 'callback'] },
+      expectedTabs: 1,
+      returnToRole: 'main'
+    },
+    steps: [
+      { action: 'tabRunSummary', tabRoles: '{{tabRoles}}', expectedTabs: '{{expectedTabs}}', captureAfter: false },
+      { action: 'popupGuard', tabRoles: '{{tabRoles}}', expectedTabs: '{{expectedTabs}}', onUnexpectedTab: 'warn', captureAfter: false },
+      { action: 'tabOrchestrator', tabRoles: '{{tabRoles}}', expectedTabs: '{{expectedTabs}}', returnToRole: '{{returnToRole}}', onUnexpectedTab: 'capture' },
+      { action: 'returnToTab', returnToRole: '{{returnToRole}}', tabRoles: '{{tabRoles}}', captureAfter: false }
+    ]
+  },
+  formFillAndVerify: {
+    category: 'generic',
+    description: 'Map a form, fill provided non-secret fields, and verify the resulting state.',
+    defaults: {
+      formFields: {},
+      submitSelector: '',
+      submitText: '',
+      assertText: '',
+      assertSelector: 'form'
+    },
+    steps: [
+      { action: 'mapForm', captureAfter: false },
+      { action: 'smartFormFill', formFields: '{{formFields}}', submitSelector: '{{submitSelector}}', submitText: '{{submitText}}' },
+      { action: 'watchPageChanges', watchDurationMs: 2500, captureAfter: false },
+      { action: 'visualAssert', assertText: '{{assertText}}', assertSelector: '{{assertSelector}}', captureAfter: false }
+    ]
+  },
+  downloadEvidenceCapture: {
+    category: 'generic',
+    description: 'Capture evidence around a download link and hash the downloaded target.',
+    defaults: {
+      selector: 'a',
+      text: '',
+      url: '',
+      captureGroup: 'download-evidence',
+      highlightSelectors: ['a']
+    },
+    steps: [
+      { action: 'highlightEvidence', selector: '{{selector}}', highlightSelectors: '{{highlightSelectors}}', includeScreenshot: true },
+      { action: 'safeDownloadAndHash', selector: '{{selector}}', text: '{{text}}', url: '{{url}}' },
+      { action: 'browserRunBundle', captureGroup: '{{captureGroup}}', captureAfter: false }
+    ]
+  },
+  flakyUiRecovery: {
+    category: 'generic',
+    description: 'Explain a recent failure and profile better waiting/targeting choices.',
+    defaults: {
+      targetHint: 'the failed target',
+      selector: 'main',
+      waitCandidates: ['spinnerGone', 'elementStable', 'networkIdle']
+    },
+    steps: [
+      { action: 'failureExplainer', targetHint: '{{targetHint}}', captureAfter: false },
+      { action: 'waitProfiler', waitCandidates: '{{waitCandidates}}', selector: '{{selector}}', captureAfter: false },
+      { action: 'stableTargetProfile', targetHint: '{{targetHint}}', selector: '{{selector}}', captureAfter: false },
+      { action: 'safeActionPreview', targetHint: '{{targetHint}}' }
+    ]
+  },
+  guidedDrilldownEvidence: {
+    category: 'generic',
+    description: 'Open relevant rows or list items and collect detail evidence.',
+    defaults: {
+      tableSelector: 'table',
+      itemSelector: '',
+      matchText: '',
+      detailSelector: 'main',
+      captureGroup: 'guided-drilldown',
+      requiredClaims: ['summary', 'detail evidence']
+    },
+    steps: [
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', outputFormat: 'json' },
+      { action: 'guidedDrilldown', tableSelector: '{{tableSelector}}', itemSelector: '{{itemSelector}}', matchText: '{{matchText}}', detailSelector: '{{detailSelector}}' },
+      { action: 'highlightEvidence', highlightSelectors: ['{{detailSelector}}'], includeScreenshot: true },
+      { action: 'evidenceCompletenessCheck', captureGroup: '{{captureGroup}}', requiredClaims: '{{requiredClaims}}' }
+    ]
+  },
+  operatorHandoff: {
+    category: 'generic',
+    description: 'Package current browser state and evidence for a human operator.',
+    defaults: {
+      captureGroup: 'operator-handoff',
+      reviewPrompt: 'Review browser evidence and continue manually if needed.'
+    },
+    steps: [
+      { action: 'createHandoff', reviewPrompt: '{{reviewPrompt}}' },
+      { action: 'buildNavigationGraph', maxEntries: 80, captureAfter: false },
+      { action: 'browserRunBundle', captureGroup: '{{captureGroup}}', captureAfter: false },
+      { action: 'captureReviewQueue', maxEntries: 50, captureAfter: false }
+    ]
+  },
+  backgroundJobWorkflow: {
+    category: 'generic',
+    description: 'Run a small step bundle as a named browser job and return its status.',
+    defaults: {
+      jobName: 'scenario-job',
+      jobSteps: [{ action: 'readPage' }],
+      captureGroup: 'scenario-job'
+    },
+    steps: [
+      { action: 'startBrowserJob', jobName: '{{jobName}}', steps: '{{jobSteps}}', captureAfter: false },
+      { action: 'getBrowserJob', jobName: '{{jobName}}', captureAfter: false },
+      { action: 'browserRunBundle', captureGroup: '{{captureGroup}}', captureAfter: false }
+    ]
+  },
+  defenderXdrIncidentTriage: {
+    category: 'microsoft-security',
+    product: 'Microsoft Defender XDR',
+    description: 'Collect visible incident summary, alerts, entities, and handoff evidence.',
+    defaults: {
+      captureGroup: 'defender-xdr-incident',
+      summarySelector: 'main',
+      alertsTableSelector: 'table',
+      alertDetailSelector: 'main',
+      requiredClaims: ['incident severity', 'incident status', 'affected entities', 'related alerts', 'timeline evidence']
+    },
+    steps: [
+      { action: 'automationHealthScore', captureAfter: false },
+      { action: 'waitPreset', waitPreset: 'defenderIncidentReady', captureAfter: false },
+      { action: 'assertPageContract', contractName: 'defenderIncidentReady' },
+      { action: 'tabRunSummary', expectedTabs: 1, captureAfter: false },
+      { action: 'guidedDrilldown', tableSelector: '{{alertsTableSelector}}', detailSelector: '{{alertDetailSelector}}' },
+      { action: 'highlightEvidence', highlightSelectors: ['{{summarySelector}}', '{{alertsTableSelector}}'], includeScreenshot: true },
+      { action: 'evidenceCompletenessCheck', captureGroup: '{{captureGroup}}', requiredClaims: '{{requiredClaims}}' },
+      { action: 'buildEvidencePack', captureGroup: '{{captureGroup}}', captureAfter: false },
+      { action: 'createHandoff', reviewPrompt: 'Review Defender XDR incident evidence before final reporting.' }
+    ]
+  },
+  defenderXdrAlertEvidenceReview: {
+    category: 'microsoft-security',
+    product: 'Microsoft Defender XDR',
+    description: 'Review per-alert evidence and impact scope.',
+    defaults: {
+      tableSelector: 'table',
+      detailSelector: 'main',
+      claim: 'alert evidence is visible',
+      captureGroup: 'defender-xdr-alerts',
+      requiredClaims: ['alert title', 'severity', 'affected entity', 'detection source']
+    },
+    steps: [
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', outputFormat: 'json' },
+      { action: 'guidedDrilldown', tableSelector: '{{tableSelector}}', detailSelector: '{{detailSelector}}' },
+      { action: 'evidenceClaimCheck', claim: '{{claim}}', tableSelector: '{{tableSelector}}' },
+      { action: 'evidenceCompletenessCheck', captureGroup: '{{captureGroup}}', requiredClaims: '{{requiredClaims}}' }
+    ]
+  },
+  sentinelLogCollection: {
+    category: 'microsoft-security',
+    product: 'Microsoft Sentinel',
+    description: 'Capture Sentinel query context and visible result table evidence.',
+    defaults: {
+      captureGroup: 'sentinel-log-collection',
+      tableSelector: 'table',
+      requiredClaims: ['query time range', 'result count', 'key entities', 'notable rows']
+    },
+    steps: [
+      { action: 'automationHealthScore', captureAfter: false },
+      { action: 'waitPreset', waitPreset: 'azureBladeReady', captureAfter: false },
+      { action: 'assertPageContract', contractName: 'azureBladeReady' },
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', headerMode: 'auto', outputFormat: 'json' },
+      { action: 'highlightEvidence', highlightSelectors: ['{{tableSelector}}'], includeScreenshot: true },
+      { action: 'evidenceCompletenessCheck', captureGroup: '{{captureGroup}}', requiredClaims: '{{requiredClaims}}' },
+      { action: 'browserRunBundle', captureGroup: '{{captureGroup}}', captureAfter: false }
+    ]
+  },
+  sentinelIncidentCorrelation: {
+    category: 'microsoft-security',
+    product: 'Microsoft Sentinel',
+    description: 'Correlate a Sentinel incident page with visible log results.',
+    defaults: {
+      goal: 'correlate Sentinel incident evidence with visible log results',
+      tableSelector: 'table',
+      claim: 'Sentinel incident evidence is supported by visible logs'
+    },
+    steps: [
+      { action: 'planAndRun', goal: '{{goal}}', tableSelector: '{{tableSelector}}', captureAfter: false },
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', outputFormat: 'json' },
+      { action: 'evidenceClaimCheck', claim: '{{claim}}', tableSelector: '{{tableSelector}}' },
+      { action: 'buildNavigationGraph', maxEntries: 80, captureAfter: false }
+    ]
+  },
+  entraRiskySignInReview: {
+    category: 'microsoft-security',
+    product: 'Microsoft Entra ID',
+    description: 'Collect risky sign-in evidence while guarding remediation actions.',
+    defaults: {
+      tableSelector: 'table',
+      detailSelector: 'main',
+      userPrincipalName: '',
+      captureGroup: 'entra-risky-signin'
+    },
+    steps: [
+      { action: 'waitPreset', waitPreset: 'entraTableReady', captureAfter: false },
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', outputFormat: 'json' },
+      { action: 'guidedDrilldown', tableSelector: '{{tableSelector}}', matchText: '{{userPrincipalName}}', detailSelector: '{{detailSelector}}' },
+      { action: 'sensitiveActionGuard', onViolation: 'block', actionTemplate: { action: 'click', targetHint: 'Confirm compromised, dismiss risk, or block user' } },
+      { action: 'highlightEvidence', highlightSelectors: ['{{detailSelector}}'], includeScreenshot: true },
+      { action: 'buildEvidencePack', captureGroup: '{{captureGroup}}', captureAfter: false }
+    ]
+  },
+  entraAuditTrailCapture: {
+    category: 'microsoft-security',
+    product: 'Microsoft Entra ID',
+    description: 'Capture Entra audit or sign-in logs after filters are applied.',
+    defaults: {
+      formFields: {},
+      tableSelector: 'table',
+      captureGroup: 'entra-audit-trail'
+    },
+    steps: [
+      { action: 'mapForm', captureAfter: false },
+      { action: 'smartFormFill', formFields: '{{formFields}}' },
+      { action: 'waitPreset', waitPreset: 'entraTableReady', captureAfter: false },
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', outputFormat: 'json' },
+      { action: 'buildEvidencePack', captureGroup: '{{captureGroup}}', captureAfter: false }
+    ]
+  },
+  mdeDeviceTimelineReview: {
+    category: 'microsoft-security',
+    product: 'Microsoft Defender for Endpoint',
+    description: 'Collect device timeline events and detail evidence.',
+    defaults: {
+      tableSelector: 'table',
+      detailSelector: 'main',
+      keyColumns: ['Time', 'Event'],
+      captureGroup: 'mde-device-timeline'
+    },
+    steps: [
+      { action: 'assertPageContract', contractSelectors: ['{{tableSelector}}'] },
+      { action: 'tableWatchAndDiff', tableSelector: '{{tableSelector}}', keyColumns: '{{keyColumns}}', watchDurationMs: 1500 },
+      { action: 'guidedDrilldown', tableSelector: '{{tableSelector}}', detailSelector: '{{detailSelector}}' },
+      { action: 'highlightEvidence', highlightSelectors: ['{{tableSelector}}', '{{detailSelector}}'], includeScreenshot: true }
+    ]
+  },
+  mdeAdvancedHuntingCollection: {
+    category: 'microsoft-security',
+    product: 'Microsoft Defender XDR Advanced Hunting',
+    description: 'Collect Advanced Hunting result evidence.',
+    defaults: {
+      tableSelector: 'table',
+      claim: 'advanced hunting results are visible',
+      captureGroup: 'mde-advanced-hunting',
+      waitCandidates: ['spinnerGone', 'elementStable', 'networkIdle']
+    },
+    steps: [
+      { action: 'waitProfiler', waitCandidates: '{{waitCandidates}}', selector: '{{tableSelector}}', captureAfter: false },
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', outputFormat: 'json' },
+      { action: 'evidenceClaimCheck', claim: '{{claim}}', tableSelector: '{{tableSelector}}' },
+      { action: 'browserRunBundle', captureGroup: '{{captureGroup}}', captureAfter: false }
+    ]
+  },
+  mdoEmailThreatReview: {
+    category: 'microsoft-security',
+    product: 'Microsoft Defender for Office 365',
+    description: 'Review malicious email, URL, attachment, and delivery evidence.',
+    defaults: {
+      tableSelector: 'table',
+      detailSelector: 'main',
+      targetHint: 'email threat action',
+      captureGroup: 'mdo-email-threat'
+    },
+    steps: [
+      { action: 'guidedDrilldown', tableSelector: '{{tableSelector}}', detailSelector: '{{detailSelector}}' },
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', outputFormat: 'json' },
+      { action: 'highlightEvidence', highlightSelectors: ['{{tableSelector}}', '{{detailSelector}}'], includeScreenshot: true },
+      { action: 'safeActionPreview', targetHint: '{{targetHint}}' }
+    ]
+  },
+  defenderForIdentityLateralMovementReview: {
+    category: 'microsoft-security',
+    product: 'Microsoft Defender for Identity',
+    description: 'Review account and host evidence for lateral movement alerts.',
+    defaults: {
+      tableSelector: 'table',
+      detailSelector: 'main',
+      claim: 'lateral movement evidence is visible',
+      captureGroup: 'mdi-lateral-movement'
+    },
+    steps: [
+      { action: 'guidedDrilldown', tableSelector: '{{tableSelector}}', detailSelector: '{{detailSelector}}' },
+      { action: 'evidenceClaimCheck', claim: '{{claim}}', tableSelector: '{{tableSelector}}' },
+      { action: 'buildEvidencePack', captureGroup: '{{captureGroup}}', captureAfter: false }
+    ]
+  },
+  defenderForCloudPostureReview: {
+    category: 'microsoft-security',
+    product: 'Microsoft Defender for Cloud',
+    description: 'Collect security recommendation, resource, and compliance posture evidence.',
+    defaults: {
+      tableSelector: 'table',
+      captureGroup: 'defender-for-cloud-posture',
+      requiredClaims: ['recommendation', 'resource', 'severity', 'compliance state']
+    },
+    steps: [
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', outputFormat: 'json' },
+      { action: 'highlightEvidence', highlightSelectors: ['{{tableSelector}}'], includeScreenshot: true },
+      { action: 'evidenceCompletenessCheck', captureGroup: '{{captureGroup}}', requiredClaims: '{{requiredClaims}}' }
+    ]
+  },
+  purviewDlpIncidentReview: {
+    category: 'microsoft-security',
+    product: 'Microsoft Purview',
+    description: 'Capture DLP alert, policy, and sensitive information evidence.',
+    defaults: {
+      tableSelector: 'table',
+      detailSelector: 'main',
+      captureGroup: 'purview-dlp-incident'
+    },
+    steps: [
+      { action: 'policyGuard', policyProfile: 'investigation', onViolation: 'warn', actionTemplate: { action: 'readPage' } },
+      { action: 'tableExtract', tableSelector: '{{tableSelector}}', outputFormat: 'json' },
+      { action: 'guidedDrilldown', tableSelector: '{{tableSelector}}', detailSelector: '{{detailSelector}}' },
+      { action: 'createHandoff', reviewPrompt: 'Review Purview DLP evidence before any remediation.' }
+    ]
+  },
+  securityPortalHandoffBundle: {
+    category: 'microsoft-security',
+    product: 'Microsoft Security portals',
+    description: 'Create a cross-product handoff bundle from current security portal evidence.',
+    defaults: {
+      captureGroup: 'security-portal-handoff',
+      reviewPrompt: 'Review security portal evidence and continue manually if needed.'
+    },
+    steps: [
+      { action: 'createHandoff', reviewPrompt: '{{reviewPrompt}}' },
+      { action: 'buildEvidencePack', captureGroup: '{{captureGroup}}', captureAfter: false },
+      { action: 'buildNavigationGraph', maxEntries: 100, captureAfter: false },
+      { action: 'captureReviewQueue', maxEntries: 50, captureAfter: false }
+    ]
+  }
+};
+
+async function runScenarioTemplate(command, allowedHosts) {
+  const scenarioName = String(command.scenarioName || '').trim();
+  if (!scenarioName) {
+    throw new Error('runScenarioTemplate requires scenarioName.');
+  }
+
+  const templates = buildScenarioTemplateRegistry(command.scenarioTemplates);
+  const template = templates[scenarioName];
+  if (!template || !Array.isArray(template.steps) || template.steps.length === 0) {
+    const available = Object.keys(templates).sort().join(', ');
+    throw new Error(`Scenario template not found: ${scenarioName}. Available: ${available}`);
+  }
+
+  const params = buildScenarioTemplateParams(command, scenarioName, template);
+  const renderedSteps = template.steps
+    .slice(0, 40)
+    .map(step => renderScenarioTemplateObject(step, params))
+    .map(step => ({ ...step, action: step.action || 'readPage' }));
+
+  const results = [];
+  for (const step of renderedSteps) {
+    if (step.action === 'runScenarioTemplate') {
+      throw new Error('Scenario templates cannot call runScenarioTemplate recursively.');
+    }
+    const result = await executeSingleAction({ ...command, ...step }, allowedHosts);
+    results.push({ action: step.action, result });
+  }
+
+  return {
+    ok: true,
+    action: 'runScenarioTemplate',
+    scenarioName,
+    category: template.category || 'custom',
+    product: template.product,
+    description: template.description,
+    stepCount: renderedSteps.length,
+    executed: results.length,
+    steps: results,
+    availableTemplates: Object.keys(templates).sort(),
+    recommendedNextAction: template.recommendedNextAction || 'reviewScenarioResults'
+  };
+}
+
+function buildScenarioTemplateRegistry(customTemplates) {
+  const registry = { ...SCENARIO_TEMPLATE_REGISTRY };
+  if (!customTemplates || typeof customTemplates !== 'object' || Array.isArray(customTemplates)) {
+    return registry;
+  }
+
+  for (const [name, template] of Object.entries(customTemplates)) {
+    if (!name || !template || typeof template !== 'object' || Array.isArray(template)) {
+      continue;
+    }
+    if (Array.isArray(template.steps) && template.steps.length > 0) {
+      registry[name] = {
+        category: String(template.category || 'custom'),
+        product: typeof template.product === 'string' ? template.product : undefined,
+        description: typeof template.description === 'string' ? template.description : 'Custom scenario template.',
+        defaults: template.defaults && typeof template.defaults === 'object' ? template.defaults : {},
+        steps: template.steps.slice(0, 40)
+      };
+    }
+  }
+
+  return registry;
+}
+
+function buildScenarioTemplateParams(command, scenarioName, template) {
+  const defaults = template.defaults && typeof template.defaults === 'object' ? template.defaults : {};
+  const direct = {};
+  const keys = [
+    'selector', 'text', 'value', 'url', 'urls', 'formFields', 'submitSelector', 'submitText', 'targetHint', 'tableSelector',
+    'detailSelector', 'itemSelector', 'matchText', 'claim', 'requiredClaims', 'keyColumns', 'waitCandidates', 'waitPreset',
+    'contractName', 'contractSelectors', 'contractTexts', 'captureGroup', 'jobName', 'tabRoles', 'expectedTabs', 'returnToRole',
+    'actionTemplate', 'highlightSelectors', 'highlightText', 'reviewPrompt', 'approvalKeyword', 'goal', 'params'
+  ];
+  for (const key of keys) {
+    if (command[key] !== undefined) {
+      direct[key] = command[key];
+    }
+  }
+
+  return {
+    ...defaults,
+    scenarioName,
+    captureGroup: command.captureGroup || command.investigationName || defaults.captureGroup || scenarioName,
+    investigationName: command.investigationName || command.captureGroup || defaults.captureGroup || scenarioName,
+    ...direct,
+    ...(command.params && typeof command.params === 'object' ? command.params : {})
+  };
+}
+
+function renderScenarioTemplateObject(input, params) {
+  if (typeof input === 'string') {
+    const exact = input.match(/^\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}$/);
+    if (exact) {
+      return readScenarioParam(params, exact[1], input);
+    }
+    return input.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (match, key) => {
+      const value = readScenarioParam(params, key, undefined);
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+      }
+      return match;
+    });
+  }
+  if (Array.isArray(input)) {
+    return input.map(item => renderScenarioTemplateObject(item, params));
+  }
+  if (!input || typeof input !== 'object') {
+    return input;
+  }
+
+  const output = {};
+  for (const [key, value] of Object.entries(input)) {
+    output[key] = renderScenarioTemplateObject(value, params);
+  }
+  return output;
+}
+
+function readScenarioParam(params, key, fallback) {
+  if (Object.prototype.hasOwnProperty.call(params, key)) {
+    return params[key];
+  }
+
+  const parts = key.split('.');
+  let current = params;
+  for (const part of parts) {
+    if (!current || typeof current !== 'object' || !Object.prototype.hasOwnProperty.call(current, part)) {
+      return fallback;
+    }
+    current = current[part];
+  }
+  return current === undefined ? fallback : current;
 }
 
 function renderTemplateObject(input, params) {

@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-06-06
+
+- Added `runScenarioTemplate` for reusable browser automation scenario templates.
+- Added 10 built-in generic scenario templates for readiness, evidence, guarded actions, tab/auth flows, forms, downloads, recovery, drilldown, handoff, and jobs.
+- Added Microsoft Security templates for Defender XDR, Sentinel, Entra, MDE, MDO, Defender for Identity, Defender for Cloud, Purview, and cross-portal handoff workflows.
+- Added `scenarioName`, `scenarioTemplates`, and richer `params` support for template execution.
+
 ## [0.1.23] - 2026-06-06
 
 - Added `tabOrchestrator` to classify, return to, and optionally clean up browser tabs by logical role.

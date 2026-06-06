@@ -157,7 +157,9 @@ type BrowserStepInput = {
 	retryProfile?: 'conservative' | 'standard' | 'aggressive';
 	captureBeforeAfter?: boolean;
 	macroName?: string;
-	params?: Record<string, string>;
+	params?: Record<string, unknown>;
+	scenarioName?: string;
+	scenarioTemplates?: Record<string, unknown>;
 	steps?: BrowserStepInput[];
 	assertText?: string;
 	assertNoText?: string;
@@ -265,6 +267,7 @@ type BrowserAction =
 	| 'cancelBrowserJob'
 	| 'recordWorkflow'
 	| 'replayWorkflow'
+	| 'runScenarioTemplate'
 	| 'resumeAfterAuth'
 	| 'runWorkflow';
 
@@ -346,7 +349,9 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	retryProfile: 'conservative' | 'standard' | 'aggressive';
 	captureBeforeAfter: boolean;
 	macroName?: string;
-	params?: Record<string, string>;
+	params?: Record<string, unknown>;
+	scenarioName?: string;
+	scenarioTemplates?: Record<string, unknown>;
 	assertText?: string;
 	assertNoText?: string;
 	assertSelector?: string;
@@ -755,7 +760,7 @@ const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'visualAssert', 'accessibilitySnapshot', 'mapForm',
 	'watchPageChanges', 'highlightEvidence', 'planAndRun', 'evidenceClaimCheck', 'tableWatchAndDiff', 'browserRunBundle', 'safeActionPreview', 'stableTargetProfile', 'guidedDrilldown', 'evidenceCompletenessCheck',
 	'failureExplainer', 'waitProfiler', 'automationHealthScore', 'sensitiveActionGuard', 'tabOrchestrator', 'popupGuard', 'returnToTab', 'tabRunSummary', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
-	'captureReviewQueue', 'startBrowserJob', 'getBrowserJob', 'cancelBrowserJob', 'recordWorkflow', 'replayWorkflow',
+	'captureReviewQueue', 'startBrowserJob', 'getBrowserJob', 'cancelBrowserJob', 'recordWorkflow', 'replayWorkflow', 'runScenarioTemplate',
 	'resumeAfterAuth', 'runWorkflow'
 ];
 
@@ -867,7 +872,9 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		includeHtml: input.includeHtml ?? false,
 		captureBeforeAfter: Boolean(input.captureBeforeAfter),
 		macroName: sanitizeMacroName(input.macroName),
-		params: sanitizeSelectorMap(input.params),
+		params: sanitizeTemplateParams(input.params),
+		scenarioName: sanitizeScenarioName(input.scenarioName),
+		scenarioTemplates: sanitizeJsonObject(input.scenarioTemplates, 4),
 		assertText: input.assertText,
 		assertNoText: input.assertNoText,
 		assertSelector: input.assertSelector,
@@ -932,6 +939,60 @@ function sanitizeSelectorMap(values: Record<string, string> | undefined) {
 	}
 
 	return Object.fromEntries(entries);
+}
+
+function sanitizeTemplateParams(values: Record<string, unknown> | undefined) {
+	return sanitizeJsonObject(values, 4);
+}
+
+function sanitizeScenarioName(value: string | undefined) {
+	const name = typeof value === 'string' ? value.trim() : '';
+	return name.length > 0 ? name.slice(0, 120) : undefined;
+}
+
+function sanitizeJsonObject(values: Record<string, unknown> | undefined, depth: number): Record<string, unknown> | undefined {
+	if (!values || typeof values !== 'object' || Array.isArray(values) || depth < 0) {
+		return undefined;
+	}
+
+	const entries = Object.entries(values)
+		.filter(([key]) => key.trim().length > 0)
+		.slice(0, 50)
+		.map(([key, value]) => [key.trim(), sanitizeJsonValue(value, depth)] as const)
+		.filter(([, value]) => value !== undefined);
+
+	return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function sanitizeJsonValue(value: unknown, depth: number): unknown {
+	if (typeof value === 'string') {
+		return value.slice(0, 4000);
+	}
+
+	if (typeof value === 'number') {
+		return Number.isFinite(value) ? value : undefined;
+	}
+
+	if (typeof value === 'boolean' || value === null) {
+		return value;
+	}
+
+	if (Array.isArray(value)) {
+		if (depth <= 0) {
+			return undefined;
+		}
+		const items = value.slice(0, 50).map(item => sanitizeJsonValue(item, depth - 1)).filter(item => item !== undefined);
+		return items.length > 0 ? items : [];
+	}
+
+	if (value && typeof value === 'object') {
+		if (depth <= 0) {
+			return undefined;
+		}
+		return sanitizeJsonObject(value as Record<string, unknown>, depth - 1);
+	}
+
+	return undefined;
 }
 
 function sanitizeStringArrayMap(values: Record<string, string[]> | undefined) {
@@ -1054,6 +1115,15 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 
 	if (action === 'replayWorkflow' && !step.macroName) {
 		throw new Error('browserAct replayWorkflow requires macroName.');
+	}
+
+	if (action === 'runScenarioTemplate') {
+		if (!topLevel) {
+			throw new Error('runScenarioTemplate can only be used as the top-level action.');
+		}
+		if (!step.scenarioName) {
+			throw new Error('browserAct runScenarioTemplate requires scenarioName.');
+		}
 	}
 
 	if (action === 'journeyCapture') {
