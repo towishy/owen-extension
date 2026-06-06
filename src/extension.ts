@@ -129,6 +129,7 @@ type BrowserStepInput = {
 	captureAfter?: boolean;
 	includeScreenshot?: boolean;
 	includeHtml?: boolean;
+	investigationName?: string;
 	urlIncludes?: string[];
 	durationMs?: number;
 	maxEntries?: number;
@@ -167,6 +168,12 @@ type BrowserStepInput = {
 	watchDurationMs?: number;
 	highlightSelectors?: string[];
 	highlightText?: string;
+	waitPreset?: 'defenderIncidentReady' | 'azureBladeReady' | 'entraTableReady' | 'genericPortalReady';
+	contractName?: string;
+	contractSelectors?: string[];
+	contractTexts?: string[];
+	captureGroup?: string;
+	jobName?: string;
 };
 
 type BrowserPreset = 'defenderIncidentSurvey' | 'defenderIncidentAlerts' | 'defenderIncidentEvidence';
@@ -179,6 +186,7 @@ type BrowserAction =
 	| 'navigate'
 	| 'waitForText'
 	| 'wait'
+	| 'waitPreset'
 	| 'scroll'
 	| 'hover'
 	| 'keyPress'
@@ -219,6 +227,15 @@ type BrowserAction =
 	| 'mapForm'
 	| 'watchPageChanges'
 	| 'highlightEvidence'
+	| 'buildEvidencePack'
+	| 'buildNavigationGraph'
+	| 'assertPageContract'
+	| 'createHandoff'
+	| 'selectorHealthReport'
+	| 'captureReviewQueue'
+	| 'startBrowserJob'
+	| 'getBrowserJob'
+	| 'cancelBrowserJob'
 	| 'recordWorkflow'
 	| 'replayWorkflow'
 	| 'resumeAfterAuth'
@@ -312,6 +329,12 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	watchDurationMs: number;
 	highlightSelectors: string[];
 	highlightText?: string;
+	waitPreset?: 'defenderIncidentReady' | 'azureBladeReady' | 'entraTableReady' | 'genericPortalReady';
+	contractName?: string;
+	contractSelectors: string[];
+	contractTexts: string[];
+	captureGroup?: string;
+	jobName?: string;
 	investigationName?: string;
 	allowedHosts: string[];
 };
@@ -686,13 +709,14 @@ async function invokeBrowserAction(context: vscode.ExtensionContext, input: Brow
 }
 
 const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
-	'readPage', 'capture', 'click', 'type', 'navigate', 'waitForText', 'wait', 'scroll', 'hover', 'keyPress',
+	'readPage', 'capture', 'click', 'type', 'navigate', 'waitForText', 'wait', 'waitPreset', 'scroll', 'hover', 'keyPress',
 	'selectOption', 'clearInput', 'back', 'forward', 'reload', 'openInNewTab', 'switchTab', 'closeTab',
 	'listInteractables', 'inspectTargets', 'captureElement', 'captureRegion', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
 	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
 	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
 	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'visualAssert', 'accessibilitySnapshot', 'mapForm',
-	'watchPageChanges', 'highlightEvidence', 'recordWorkflow', 'replayWorkflow',
+	'watchPageChanges', 'highlightEvidence', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
+	'captureReviewQueue', 'startBrowserJob', 'getBrowserJob', 'cancelBrowserJob', 'recordWorkflow', 'replayWorkflow',
 	'resumeAfterAuth', 'runWorkflow'
 ];
 
@@ -814,6 +838,12 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		watchDurationMs: clampWatchDurationMs(input.watchDurationMs),
 		highlightSelectors: sanitizeStringList(input.highlightSelectors),
 		highlightText: input.highlightText,
+		waitPreset: input.waitPreset,
+		contractName: input.contractName,
+		contractSelectors: sanitizeStringList(input.contractSelectors),
+		contractTexts: sanitizeStringList(input.contractTexts),
+		captureGroup: input.captureGroup,
+		jobName: input.jobName,
 		investigationName: input.investigationName,
 		allowedHosts
 	};
@@ -938,6 +968,10 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 		throw new Error('browserAct wait requires wait.kind.');
 	}
 
+	if (action === 'waitPreset' && !step.waitPreset) {
+		throw new Error('browserAct waitPreset requires waitPreset.');
+	}
+
 	if (action === 'wait' && step.wait?.kind === 'requestDone' && (!Array.isArray(step.wait.urlIncludes) || step.wait.urlIncludes.length === 0)) {
 		throw new Error('browserAct wait requestDone requires wait.urlIncludes.');
 	}
@@ -1024,6 +1058,18 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 		throw new Error('browserAct highlightEvidence requires selector, text, targetHint, highlightSelectors, or highlightText.');
 	}
 
+	if (action === 'buildEvidencePack' && !step.captureGroup && !step.investigationName) {
+		throw new Error('browserAct buildEvidencePack requires captureGroup or investigationName.');
+	}
+
+	if (action === 'assertPageContract' && !step.contractName && (!Array.isArray(step.contractSelectors) || step.contractSelectors.length === 0) && (!Array.isArray(step.contractTexts) || step.contractTexts.length === 0)) {
+		throw new Error('browserAct assertPageContract requires contractName, contractSelectors, or contractTexts.');
+	}
+
+	if ((action === 'startBrowserJob' || action === 'getBrowserJob' || action === 'cancelBrowserJob') && !step.jobName) {
+		throw new Error(`browserAct ${action} requires jobName.`);
+	}
+
 	if (step.targetScope && !['auto', 'main', 'allFrames', 'shadowDeep'].includes(step.targetScope)) {
 		throw new Error('browserAct targetScope must be one of auto, main, allFrames, shadowDeep.');
 	}
@@ -1066,6 +1112,9 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 
 	const result = { ...completion, storedCapture };
 	await appendBrowserActionLog(context, completion.id, completion, storedCapture);
+	await writeBrowserCommandArtifacts(context, result).catch(error => {
+		output.appendLine(`Browser artifact generation failed: ${String(error)}`);
+	});
 	clearTimeout(waiter.timeout);
 	browserCommandWaiters.delete(completion.id);
 	if (completion.ok === false && completion.error !== 'AUTH_REQUIRED' && completion.error !== 'REVIEW_REQUIRED') {
@@ -1075,6 +1124,29 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 	}
 
 	return result;
+}
+
+async function writeBrowserCommandArtifacts(context: vscode.ExtensionContext, completion: BrowserCommandCompletion) {
+	const result = completion.result as { action?: string; steps?: Array<{ result?: Record<string, unknown> }> } | undefined;
+	const action = result?.action;
+	if (!action || !result?.steps?.[0]?.result) {
+		return;
+	}
+
+	const stepResult = result.steps[0].result;
+	if (action === 'buildEvidencePack') {
+		await writeEvidencePack(context, stepResult, completion);
+		return;
+	}
+
+	if (action === 'buildNavigationGraph') {
+		await writeNavigationGraph(context, stepResult);
+		return;
+	}
+
+	if (action === 'createHandoff' || action === 'captureReviewQueue' || action === 'selectorHealthReport') {
+		await writeBrowserReportArtifact(context, action, stepResult);
+	}
 }
 
 function extractBrowserSessionState(completion: BrowserCommandResult): BrowserSessionState | undefined {
@@ -2340,6 +2412,150 @@ function renderCaptureGroupMarkdown(summary: CaptureGroupSummary) {
 		''
 	);
 	return lines.join('\n');
+}
+
+async function writeEvidencePack(context: vscode.ExtensionContext, stepResult: Record<string, unknown>, completion: BrowserCommandCompletion) {
+	const captureGroup = String(stepResult.captureGroup ?? '').trim();
+	const baseDir = await getCaptureBaseDir(context);
+	const groupFolder = await findCaptureGroupFolder(baseDir, captureGroup);
+	if (!groupFolder) {
+		throw new Error(`Evidence pack capture group not found: ${captureGroup}`);
+	}
+
+	const summary = await readCaptureGroup(groupFolder);
+	const actionEntries = await readRecentActionLogEntries(baseDir, 100);
+	const relatedEntries = actionEntries.filter(entry => {
+		const stored = entry.storedCapture as Record<string, unknown> | undefined;
+		return stored?.groupName === summary.groupName || String(stored?.markdownPath ?? '').startsWith(groupFolder);
+	});
+	const pack = {
+		generatedAt: new Date().toISOString(),
+		captureGroup: summary,
+		requestedByCommand: completion.id,
+		actionLogCount: relatedEntries.length,
+		actionLogs: relatedEntries,
+		latestCommandResult: stepResult
+	};
+	await fs.writeFile(path.join(groupFolder, '_evidence-pack.json'), JSON.stringify(pack, null, 2), 'utf8');
+	await fs.writeFile(path.join(groupFolder, '_evidence-pack.md'), renderEvidencePackMarkdown(pack), 'utf8');
+}
+
+async function writeNavigationGraph(context: vscode.ExtensionContext, stepResult: Record<string, unknown>) {
+	const baseDir = await getCaptureBaseDir(context);
+	const folder = path.join(baseDir, '_navigation-graphs');
+	await fs.mkdir(folder, { recursive: true });
+	const id = `navigation-graph-${formatTimestamp(new Date().toISOString())}`;
+	const jsonPath = path.join(folder, `${id}.json`);
+	const markdownPath = path.join(folder, `${id}.md`);
+	await fs.writeFile(jsonPath, JSON.stringify(stepResult, null, 2), 'utf8');
+	await fs.writeFile(markdownPath, renderNavigationGraphMarkdown(stepResult), 'utf8');
+}
+
+async function writeBrowserReportArtifact(context: vscode.ExtensionContext, action: string, stepResult: Record<string, unknown>) {
+	const baseDir = await getCaptureBaseDir(context);
+	const folder = path.join(baseDir, '_reports');
+	await fs.mkdir(folder, { recursive: true });
+	const id = `${action}-${formatTimestamp(new Date().toISOString())}`;
+	await fs.writeFile(path.join(folder, `${id}.json`), JSON.stringify(stepResult, null, 2), 'utf8');
+	await fs.writeFile(path.join(folder, `${id}.md`), renderBrowserReportMarkdown(action, stepResult), 'utf8');
+}
+
+async function findCaptureGroupFolder(baseDir: string, captureGroup: string) {
+	if (!captureGroup) {
+		const entries = await fs.readdir(baseDir, { withFileTypes: true }).catch(() => []);
+		const latestHost = entries.filter(entry => entry.isDirectory()).map(entry => path.join(baseDir, entry.name)).sort().reverse()[0];
+		return latestHost ? latestChildGroupFolder(latestHost) : undefined;
+	}
+
+	const direct = path.resolve(baseDir, captureGroup);
+	if (await isDirectory(direct)) {
+		return direct;
+	}
+
+	const normalized = captureGroup.replace(/^[\\/]+|[\\/]+$/g, '');
+	const directRelative = path.join(baseDir, ...normalized.split(/[\\/]/).map(sanitizePathSegment));
+	if (await isDirectory(directRelative)) {
+		return directRelative;
+	}
+
+	return findFolderByBaseName(baseDir, sanitizePathSegment(path.basename(normalized)));
+}
+
+async function findFolderByBaseName(folder: string, name: string): Promise<string | undefined> {
+	const entries = await fs.readdir(folder, { withFileTypes: true }).catch(() => []);
+	for (const entry of entries) {
+		const candidate = path.join(folder, entry.name);
+		if (!entry.isDirectory()) {
+			continue;
+		}
+		if (entry.name === name) {
+			return candidate;
+		}
+		const found = await findFolderByBaseName(candidate, name);
+		if (found) {
+			return found;
+		}
+	}
+	return undefined;
+}
+
+async function readRecentActionLogEntries(baseDir: string, limit: number) {
+	const logDir = path.join(baseDir, '_action-logs');
+	const files = (await fs.readdir(logDir, { withFileTypes: true }).catch(() => []))
+		.filter(entry => entry.isFile() && entry.name.startsWith('browser-actions-') && entry.name.endsWith('.jsonl'))
+		.map(entry => path.join(logDir, entry.name))
+		.sort()
+		.reverse();
+	const entries: Record<string, unknown>[] = [];
+	for (const file of files.slice(0, 5)) {
+		const lines = (await fs.readFile(file, 'utf8').catch(() => '')).split(/\r?\n/).filter(Boolean).slice(-limit);
+		for (const line of lines) {
+			try {
+				entries.push(JSON.parse(line) as Record<string, unknown>);
+			} catch {
+				// Ignore malformed action-log lines.
+			}
+		}
+	}
+	return entries.slice(-limit);
+}
+
+function renderEvidencePackMarkdown(pack: { generatedAt: string; captureGroup: CaptureGroupSummary; actionLogCount: number; latestCommandResult: Record<string, unknown> }) {
+	const lines = [
+		'# Evidence Pack',
+		'',
+		`Generated: ${pack.generatedAt}`,
+		`Host: ${pack.captureGroup.host}`,
+		`Group: ${pack.captureGroup.groupName}`,
+		`Captures: ${pack.captureGroup.captureCount}`,
+		`Related action logs: ${pack.actionLogCount}`,
+		'',
+		'## Captures',
+		''
+	];
+	for (const capture of pack.captureGroup.captures) {
+		lines.push(`- ${capture.collectedAt} - ${path.basename(capture.markdownPath)} - ${capture.title ?? capture.id}`);
+	}
+	lines.push('', '## Latest Command Result', '', '```json', JSON.stringify(pack.latestCommandResult, null, 2), '```', '');
+	return lines.join('\n');
+}
+
+function renderNavigationGraphMarkdown(graph: Record<string, unknown>) {
+	const nodes = Array.isArray(graph.nodes) ? graph.nodes as Record<string, unknown>[] : [];
+	const edges = Array.isArray(graph.edges) ? graph.edges as Record<string, unknown>[] : [];
+	const lines = ['# Navigation Graph', '', `Generated: ${graph.generatedAt ?? new Date().toISOString()}`, '', `Nodes: ${nodes.length}`, `Edges: ${edges.length}`, '', '## Nodes', ''];
+	for (const node of nodes) {
+		lines.push(`- ${node.createdAt ?? ''} - ${node.action ?? ''} - ${node.title ?? node.url ?? node.id}`);
+	}
+	lines.push('', '## Edges', '');
+	for (const edge of edges) {
+		lines.push(`- ${edge.from} -> ${edge.to}`);
+	}
+	return `${lines.join('\n')}\n`;
+}
+
+function renderBrowserReportMarkdown(action: string, report: Record<string, unknown>) {
+	return ['# Browser Report', '', `Action: ${action}`, `Generated: ${new Date().toISOString()}`, '', '```json', JSON.stringify(report, null, 2), '```', ''].join('\n');
 }
 
 function decodeDataUrl(dataUrl: string) {

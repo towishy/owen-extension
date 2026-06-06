@@ -16,6 +16,7 @@ const LATEST_BROWSER_STATE_STORAGE_KEY = 'owenLatestBrowserState';
 const WORKFLOW_MACROS_STORAGE_KEY = 'owenWorkflowMacros';
 const SELECTOR_MEMORY_STORAGE_KEY = 'owenSelectorMemory';
 const VISUAL_ASSERT_STORAGE_KEY = 'owenVisualAssertBaseline';
+const BROWSER_JOBS_STORAGE_KEY = 'owenBrowserJobs';
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('owen-command-poll', { periodInMinutes: 0.5 });
@@ -283,6 +284,46 @@ async function executeSingleAction(command, allowedHosts) {
 
   if (action === 'highlightEvidence') {
     return runHighlightEvidence(command, allowedHosts);
+  }
+
+  if (action === 'buildEvidencePack') {
+    return runBuildEvidencePack(command, allowedHosts);
+  }
+
+  if (action === 'buildNavigationGraph') {
+    return runBuildNavigationGraph(command);
+  }
+
+  if (action === 'assertPageContract') {
+    return runAssertPageContract(command, allowedHosts);
+  }
+
+  if (action === 'createHandoff') {
+    return runCreateHandoff(command, allowedHosts);
+  }
+
+  if (action === 'selectorHealthReport') {
+    return runSelectorHealthReport();
+  }
+
+  if (action === 'captureReviewQueue') {
+    return runCaptureReviewQueue(command);
+  }
+
+  if (action === 'startBrowserJob') {
+    return runStartBrowserJob(command, allowedHosts);
+  }
+
+  if (action === 'getBrowserJob') {
+    return runGetBrowserJob(command);
+  }
+
+  if (action === 'cancelBrowserJob') {
+    return runCancelBrowserJob(command);
+  }
+
+  if (action === 'waitPreset') {
+    return runWaitPreset(command, allowedHosts);
   }
 
   if (action === 'recordWorkflow') {
@@ -1475,6 +1516,245 @@ async function runHighlightEvidence(command, allowedHosts) {
     screenshotDataUrl: `data:image/png;base64,${arrayBufferToBase64(buffer)}`,
     screenshotMimeType: 'image/png'
   };
+}
+
+async function runBuildEvidencePack(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const captureGroup = String(command.captureGroup || command.investigationName || '').trim();
+  return {
+    ok: true,
+    captureGroup,
+    requestedAt: new Date().toISOString(),
+    url: tab.url,
+    title: tab.title,
+    historyRunCount: executionRunHistory.size,
+    message: 'Evidence pack file assembly is completed by the VS Code extension after this command result is logged.'
+  };
+}
+
+function runBuildNavigationGraph(command) {
+  const runs = Array.from(executionRunHistory.values()).slice(-Math.min(Math.max(Number(command.maxEntries) || 50, 1), 200));
+  const nodes = [];
+  const edges = [];
+  let previousNodeId;
+  for (const run of runs) {
+    const nodeId = run.runId;
+    nodes.push({
+      id: nodeId,
+      action: run.action,
+      title: run.title,
+      url: run.url,
+      createdAt: run.createdAt,
+      stepCount: Array.isArray(run.steps) ? run.steps.length : 0
+    });
+    if (previousNodeId) {
+      edges.push({ from: previousNodeId, to: nodeId });
+    }
+    previousNodeId = nodeId;
+  }
+  return { ok: true, generatedAt: new Date().toISOString(), nodeCount: nodes.length, edgeCount: edges.length, nodes, edges };
+}
+
+async function runAssertPageContract(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const preset = pageContractPreset(command.contractName);
+  const selectors = [...(preset.selectors || []), ...(Array.isArray(command.contractSelectors) ? command.contractSelectors : [])].filter(Boolean);
+  const texts = [...(preset.texts || []), ...(Array.isArray(command.contractTexts) ? command.contractTexts : [])].filter(Boolean);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: (selectorsInput, textsInput, contractName) => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const visibleText = normalize(document.body?.innerText ?? '');
+      const isVisible = element => {
+        if (!element) {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
+      };
+      const selectorResults = selectorsInput.map(selector => ({ selector, passed: isVisible(document.querySelector(selector)) }));
+      const textResults = textsInput.map(text => ({ text, passed: visibleText.toLowerCase().includes(String(text).toLowerCase()) }));
+      const failed = [...selectorResults, ...textResults].filter(item => !item.passed);
+      return {
+        ok: failed.length === 0,
+        contractName: contractName || 'custom',
+        url: location.href,
+        title: document.title,
+        selectorResults,
+        textResults,
+        failed
+      };
+    },
+    args: [selectors, texts, command.contractName]
+  });
+  return result ?? { ok: false, failed: [{ reason: 'no result' }] };
+}
+
+function pageContractPreset(name) {
+  const key = String(name || '').trim();
+  const presets = {
+    genericPortalReady: { selectors: ['body'], texts: [] },
+    defenderIncidentReady: { selectors: ['[role="tab"],button,a'], texts: ['Overview'] },
+    azureBladeReady: { selectors: ['main,[role="main"],body'], texts: [] },
+    entraTableReady: { selectors: ['table,[role="grid"],[role="table"]'], texts: [] }
+  };
+  return presets[key] || { selectors: [], texts: [] };
+}
+
+async function runCreateHandoff(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const latestRun = Array.from(executionRunHistory.values()).slice(-1)[0];
+  const [{ result: targets }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: inspectTargetsOnPage,
+    args: [buildTargetIntent(command)]
+  });
+  return {
+    ok: true,
+    createdAt: new Date().toISOString(),
+    url: tab.url,
+    title: tab.title,
+    reason: command.reviewPrompt || command.text || 'Manual handoff requested.',
+    latestRun,
+    candidateTargets: Array.isArray(targets?.rankedTargets) ? targets.rankedTargets.slice(0, 8) : []
+  };
+}
+
+async function runSelectorHealthReport() {
+  const stored = await chrome.storage.local.get(SELECTOR_MEMORY_STORAGE_KEY);
+  const memory = stored[SELECTOR_MEMORY_STORAGE_KEY] && typeof stored[SELECTOR_MEMORY_STORAGE_KEY] === 'object'
+    ? stored[SELECTOR_MEMORY_STORAGE_KEY]
+    : {};
+  const entries = Object.entries(memory).map(([key, values]) => {
+    const items = Array.isArray(values) ? values : [];
+    return {
+      key,
+      rememberedCount: items.length,
+      autoHealedCount: items.filter(item => item?.autoHealed).length,
+      latestUpdatedAt: items[0]?.updatedAt,
+      latestSelector: items[0]?.selector,
+      latestText: items[0]?.text
+    };
+  }).sort((a, b) => String(b.latestUpdatedAt || '').localeCompare(String(a.latestUpdatedAt || '')));
+  return { ok: true, generatedAt: new Date().toISOString(), entryCount: entries.length, entries: entries.slice(0, 100) };
+}
+
+function runCaptureReviewQueue(command) {
+  const limit = Math.min(Math.max(Number(command.maxEntries) || 30, 1), 100);
+  const runs = Array.from(executionRunHistory.values()).slice(-limit);
+  const items = [];
+  for (const run of runs) {
+    const steps = Array.isArray(run.steps) ? run.steps : [];
+    const failedSteps = steps.filter(step => step?.result?.ok === false || step?.result?.passed === false || step?.result?.error);
+    const qualityFindings = steps.flatMap(step => step?.result?.page?.screenSummary?.captureQuality?.findings || []);
+    if (failedSteps.length > 0 || qualityFindings.length > 0) {
+      items.push({
+        runId: run.runId,
+        action: run.action,
+        url: run.url,
+        title: run.title,
+        createdAt: run.createdAt,
+        failedStepCount: failedSteps.length,
+        qualityFindings
+      });
+    }
+  }
+  return { ok: true, generatedAt: new Date().toISOString(), itemCount: items.length, items };
+}
+
+async function runStartBrowserJob(command, allowedHosts) {
+  const jobName = String(command.jobName || '').trim();
+  const stored = await chrome.storage.local.get(BROWSER_JOBS_STORAGE_KEY);
+  const jobs = stored[BROWSER_JOBS_STORAGE_KEY] && typeof stored[BROWSER_JOBS_STORAGE_KEY] === 'object' ? stored[BROWSER_JOBS_STORAGE_KEY] : {};
+  const steps = Array.isArray(command.steps) ? command.steps.slice(0, 30) : [];
+  const job = {
+    jobName,
+    status: 'running',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    stepCount: steps.length,
+    results: []
+  };
+  jobs[jobName] = job;
+  await chrome.storage.local.set({ [BROWSER_JOBS_STORAGE_KEY]: jobs });
+
+  for (const step of steps) {
+    if (jobs[jobName]?.status === 'cancelled') {
+      break;
+    }
+    const result = await executeSingleAction({ ...command, ...step, action: step.action ?? 'readPage' }, allowedHosts);
+    job.results.push({ action: step.action ?? 'readPage', result });
+  }
+  job.status = job.results.length === steps.length ? 'completed' : 'cancelled';
+  job.updatedAt = new Date().toISOString();
+  jobs[jobName] = job;
+  await chrome.storage.local.set({ [BROWSER_JOBS_STORAGE_KEY]: jobs });
+  return { ok: true, job };
+}
+
+async function runGetBrowserJob(command) {
+  const stored = await chrome.storage.local.get(BROWSER_JOBS_STORAGE_KEY);
+  const jobs = stored[BROWSER_JOBS_STORAGE_KEY] && typeof stored[BROWSER_JOBS_STORAGE_KEY] === 'object' ? stored[BROWSER_JOBS_STORAGE_KEY] : {};
+  const job = jobs[String(command.jobName || '').trim()];
+  if (!job) {
+    throw new Error(`Browser job not found: ${command.jobName}`);
+  }
+  return { ok: true, job };
+}
+
+async function runCancelBrowserJob(command) {
+  const stored = await chrome.storage.local.get(BROWSER_JOBS_STORAGE_KEY);
+  const jobs = stored[BROWSER_JOBS_STORAGE_KEY] && typeof stored[BROWSER_JOBS_STORAGE_KEY] === 'object' ? stored[BROWSER_JOBS_STORAGE_KEY] : {};
+  const jobName = String(command.jobName || '').trim();
+  const job = jobs[jobName];
+  if (!job) {
+    throw new Error(`Browser job not found: ${jobName}`);
+  }
+  job.status = 'cancelled';
+  job.updatedAt = new Date().toISOString();
+  jobs[jobName] = job;
+  await chrome.storage.local.set({ [BROWSER_JOBS_STORAGE_KEY]: jobs });
+  return { ok: true, job };
+}
+
+async function runWaitPreset(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const preset = waitPresetConfig(command.waitPreset);
+  const checks = [];
+  if (preset.wait) {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: runDomCommand,
+      args: [{ action: 'wait', wait: preset.wait, timeoutMs: command.timeoutMs }]
+    });
+    checks.push({ kind: preset.wait.kind, result });
+    if (result?.error) {
+      throw new Error(result.error);
+    }
+  }
+  if (preset.contract) {
+    const contractResult = await runAssertPageContract({ ...command, ...preset.contract }, allowedHosts);
+    checks.push({ kind: 'contract', result: contractResult });
+    if (!contractResult.ok) {
+      throw new Error(`waitPreset contract failed: ${command.waitPreset}`);
+    }
+  }
+  return { ok: true, waitPreset: command.waitPreset, checks };
+}
+
+function waitPresetConfig(name) {
+  const presets = {
+    genericPortalReady: { wait: { kind: 'spinnerGone', pollIntervalMs: 400 }, contract: { contractSelectors: ['body'] } },
+    defenderIncidentReady: { wait: { kind: 'composite', selector: '[role="tab"]', pollIntervalMs: 500 }, contract: { contractName: 'defenderIncidentReady' } },
+    azureBladeReady: { wait: { kind: 'spinnerGone', pollIntervalMs: 500 }, contract: { contractName: 'azureBladeReady' } },
+    entraTableReady: { wait: { kind: 'spinnerGone', pollIntervalMs: 500 }, contract: { contractName: 'entraTableReady' } }
+  };
+  return presets[String(name || 'genericPortalReady')] || presets.genericPortalReady;
 }
 
 async function buildTargetCandidatesWithMemory(command, tab) {

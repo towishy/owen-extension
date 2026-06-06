@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-06-06
+
+- Added `buildEvidencePack` to assemble capture-group evidence pack Markdown/JSON artifacts.
+- Added `buildNavigationGraph` to summarize recent browser action flow as graph artifacts.
+- Added readiness and contract checks with `waitPreset` and `assertPageContract`.
+- Added operational reports for handoff, selector health, capture review queue, and lightweight browser jobs.
+
 ## [0.1.18] - 2026-06-06
 
 - Added `accessibilitySnapshot` for role/name-oriented page structure inspection.

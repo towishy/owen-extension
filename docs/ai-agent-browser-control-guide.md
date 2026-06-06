@@ -148,6 +148,16 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `mapForm` | Return form field schema before filling | `selector`, `maxEntries` | New | `#browserAct { "action": "mapForm", "captureAfter": false }` |
 | `watchPageChanges` | Observe short-window DOM, URL, text, and resource changes | `watchDurationMs` | New | `#browserAct { "action": "watchPageChanges", "watchDurationMs": 2500, "captureAfter": false }` |
 | `highlightEvidence` | Store highlighted screenshot evidence | `highlightSelectors`, `highlightText`, `selector` | New | `#browserAct { "action": "highlightEvidence", "highlightSelectors": ["#data-table"], "captureAfter": true, "includeScreenshot": true }` |
+| `waitPreset` | Wait for named portal readiness conditions | `waitPreset` | New | `#browserAct { "action": "waitPreset", "waitPreset": "genericPortalReady", "captureAfter": false }` |
+| `assertPageContract` | Verify expected page selectors/texts | `contractName`, `contractSelectors`, `contractTexts` | New | `#browserAct { "action": "assertPageContract", "contractSelectors": ["#data-table"], "contractTexts": ["READY_MARKER"] }` |
+| `buildEvidencePack` | Write capture-group evidence pack files | `captureGroup` | New | `#browserAct { "action": "buildEvidencePack", "captureGroup": "case-001", "captureAfter": false }` |
+| `buildNavigationGraph` | Write recent action-flow graph files | `maxEntries` | New | `#browserAct { "action": "buildNavigationGraph", "maxEntries": 80, "captureAfter": false }` |
+| `createHandoff` | Summarize current state for manual continuation | `reviewPrompt`, `targetHint` | New | `#browserAct { "action": "createHandoff", "reviewPrompt": "Need manual review" }` |
+| `selectorHealthReport` | Report remembered selector health | none | New | `#browserAct { "action": "selectorHealthReport", "captureAfter": false }` |
+| `captureReviewQueue` | List runs that need review | `maxEntries` | New | `#browserAct { "action": "captureReviewQueue", "maxEntries": 50 }` |
+| `startBrowserJob` | Run named step bundle and store job status | `jobName`, `steps` | New | `#browserAct { "action": "startBrowserJob", "jobName": "smoke", "steps": [{ "action": "readPage" }] }` |
+| `getBrowserJob` | Read stored job status | `jobName` | New | `#browserAct { "action": "getBrowserJob", "jobName": "smoke" }` |
+| `cancelBrowserJob` | Mark stored job cancelled | `jobName` | New | `#browserAct { "action": "cancelBrowserJob", "jobName": "smoke" }` |
 | `resumeAfterAuth` | Continue after manual sign-in | none | Conditional: only valid after `AUTH_REQUIRED`; no pending auth in smoke test | `#browserAct { "action": "resumeAfterAuth" }` |
 
 ## Wait Conditions
@@ -183,6 +193,12 @@ Use these inputs with `#browserAct` for higher reliability on modern web apps:
 | `captureBeforeAfter` | Adds lightweight before/after DOM diff metadata |
 | `macroName` | Macro identifier for `recordWorkflow` and `replayWorkflow` |
 | `params` | Template values for replay (`{{key}}`) |
+| `waitPreset` | Named readiness preset: `genericPortalReady`, `defenderIncidentReady`, `azureBladeReady`, `entraTableReady` |
+| `contractName` | Named contract for `assertPageContract` |
+| `contractSelectors` | Selectors that must be visible |
+| `contractTexts` | Text snippets that must be present |
+| `captureGroup` | Group or host/group path for evidence pack generation |
+| `jobName` | Stored browser job identifier |
 
 Use `visualAssert` after click/type/navigation steps when the important question is whether the UI actually reached the expected state. Prefer `assertText` plus `assertSelector` for portal pages where a click can succeed without changing the active blade or table.
 
@@ -200,10 +216,20 @@ New actions:
 | `mapForm` | Return field labels, names, types, required state, options, and selector hints | `selector`, `maxEntries` |
 | `watchPageChanges` | Observe mutation count, URL/title/text deltas, and new resource timings | `watchDurationMs` |
 | `highlightEvidence` | Create a screenshot with labeled boxes around important visible targets | `highlightSelectors`, `highlightText`, `selector` |
+| `waitPreset` | Run a named readiness wait and contract check | `waitPreset` |
+| `assertPageContract` | Check page selectors/texts or named portal contracts | `contractName`, `contractSelectors`, `contractTexts` |
+| `buildEvidencePack` | Assemble `_evidence-pack.md` and `_evidence-pack.json` in a capture group | `captureGroup` |
+| `buildNavigationGraph` | Create `_navigation-graphs/*.md` and `*.json` from recent action history | `maxEntries` |
+| `createHandoff` | Create a manual handoff report with latest run and candidate targets | `reviewPrompt`, `targetHint` |
+| `selectorHealthReport` | Export remembered selector usage summary | none |
+| `captureReviewQueue` | Export runs with failed steps or quality findings | `maxEntries` |
+| `startBrowserJob` / `getBrowserJob` / `cancelBrowserJob` | Manage a named synchronous job summary for step bundles | `jobName`, `steps` |
 | `recordWorkflow` | Save reusable workflow steps in browser local storage | `macroName`, `steps` |
 | `replayWorkflow` | Replay a saved workflow with optional template parameters | `macroName`, `params`, `captureBeforeAfter` |
 
 Prefer `accessibilitySnapshot` before uncertain clicks and `mapForm` before `smartFormFill`. Use `watchPageChanges` after manual sign-in, navigation, or portal blade changes when the page may still be settling. Use `highlightEvidence` for screenshots that need to show exactly which table, panel, or status marker supports the conclusion.
+
+Use `waitPreset` before portal-specific evidence collection, then `assertPageContract` before extracting tables or summarizing visible evidence. After collecting multiple captures, call `buildEvidencePack` and `buildNavigationGraph` so downstream analysis can correlate action flow, captures, and screenshots. Use `createHandoff` when automation reaches a point where the operator should continue manually.
 
 Semantic expressions for `semanticWait` or `wait.kind=semantic`:
 
