@@ -299,6 +299,8 @@ Open `Owen Browser Bridge: Open Setup Page` and add that page's hostname under *
 
 Run `Owen Browser Bridge: Show Action Trace` from the VS Code Command Palette. The command opens a Markdown view of recent action log entries, including command ids, action names, step counts, before/after diff metadata, and stored capture links when available.
 
+For uncertain portal pages, use `#browserAct { "action": "accessibilitySnapshot" }` to inspect role/name targets and `#browserAct { "action": "mapForm" }` before `smartFormFill`. Use `watchPageChanges` after navigation or sign-in transitions, and `highlightEvidence` when a screenshot should visually mark the table, panel, or status text used as evidence.
+
 ### Configure capture redaction
 
 Stored JSON and Markdown captures use `owenBrowserBridge.redactionProfile` before files are written. The default is `standard`; use `strict` for broader token-like string masking or `off` only for controlled local tests. Add site-specific JavaScript regular expression strings to `owenBrowserBridge.customRedactionPatterns` when a portal exposes sensitive identifiers with a custom format.

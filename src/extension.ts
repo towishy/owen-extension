@@ -164,6 +164,9 @@ type BrowserStepInput = {
 	assertNotSelector?: string;
 	assertScreenshotChanged?: boolean;
 	selectorMemory?: boolean;
+	watchDurationMs?: number;
+	highlightSelectors?: string[];
+	highlightText?: string;
 };
 
 type BrowserPreset = 'defenderIncidentSurvey' | 'defenderIncidentAlerts' | 'defenderIncidentEvidence';
@@ -212,6 +215,10 @@ type BrowserAction =
 	| 'compareCaptureRuns'
 	| 'policyGuard'
 	| 'visualAssert'
+	| 'accessibilitySnapshot'
+	| 'mapForm'
+	| 'watchPageChanges'
+	| 'highlightEvidence'
 	| 'recordWorkflow'
 	| 'replayWorkflow'
 	| 'resumeAfterAuth'
@@ -302,6 +309,9 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	assertNotSelector?: string;
 	assertScreenshotChanged: boolean;
 	selectorMemory: boolean;
+	watchDurationMs: number;
+	highlightSelectors: string[];
+	highlightText?: string;
 	investigationName?: string;
 	allowedHosts: string[];
 };
@@ -681,7 +691,8 @@ const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'listInteractables', 'inspectTargets', 'captureElement', 'captureRegion', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
 	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
 	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
-	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'visualAssert', 'recordWorkflow', 'replayWorkflow',
+	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'visualAssert', 'accessibilitySnapshot', 'mapForm',
+	'watchPageChanges', 'highlightEvidence', 'recordWorkflow', 'replayWorkflow',
 	'resumeAfterAuth', 'runWorkflow'
 ];
 
@@ -800,6 +811,9 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		assertNotSelector: input.assertNotSelector,
 		assertScreenshotChanged: Boolean(input.assertScreenshotChanged),
 		selectorMemory: input.selectorMemory ?? true,
+		watchDurationMs: clampWatchDurationMs(input.watchDurationMs),
+		highlightSelectors: sanitizeStringList(input.highlightSelectors),
+		highlightText: input.highlightText,
 		investigationName: input.investigationName,
 		allowedHosts
 	};
@@ -1006,6 +1020,10 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 		throw new Error('browserAct visualAssert requires at least one assertion input.');
 	}
 
+	if (action === 'highlightEvidence' && !step.selector && !step.text && !step.targetHint && (!Array.isArray(step.highlightSelectors) || step.highlightSelectors.length === 0) && !step.highlightText) {
+		throw new Error('browserAct highlightEvidence requires selector, text, targetHint, highlightSelectors, or highlightText.');
+	}
+
 	if (step.targetScope && !['auto', 'main', 'allFrames', 'shadowDeep'].includes(step.targetScope)) {
 		throw new Error('browserAct targetScope must be one of auto, main, allFrames, shadowDeep.');
 	}
@@ -1187,6 +1205,14 @@ function clampDurationMs(value: number | undefined) {
 	}
 
 	return Math.min(Math.max(Math.trunc(value), 1000), 120000);
+}
+
+function clampWatchDurationMs(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return 3000;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), 500), 30000);
 }
 
 function clampMaxEntries(value: number | undefined) {

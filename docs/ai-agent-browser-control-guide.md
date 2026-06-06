@@ -144,6 +144,10 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `compareCaptureRuns` | Compare two recent action runs | `baseRunId`, `newRunId`, `ignoreSelectors` | Success | `#browserAct { "action": "compareCaptureRuns" }` |
 | `policyGuard` | Check host/action policy before proceeding | `policyProfile`, `onViolation`, `actionTemplate` | Success | `#browserAct { "action": "policyGuard", "policyProfile": "standard", "onViolation": "block", "actionTemplate": { "action": "click" } }` |
 | `visualAssert` | Assert current visual/page state | `assertText`, `assertNoText`, `assertSelector`, `assertNotSelector`, `assertScreenshotChanged` | New | `#browserAct { "action": "visualAssert", "assertText": "READY_MARKER", "assertSelector": "#data-table", "captureAfter": false }` |
+| `accessibilitySnapshot` | Inspect role/name-oriented page structure | `maxEntries` | New | `#browserAct { "action": "accessibilitySnapshot", "maxEntries": 80, "captureAfter": false }` |
+| `mapForm` | Return form field schema before filling | `selector`, `maxEntries` | New | `#browserAct { "action": "mapForm", "captureAfter": false }` |
+| `watchPageChanges` | Observe short-window DOM, URL, text, and resource changes | `watchDurationMs` | New | `#browserAct { "action": "watchPageChanges", "watchDurationMs": 2500, "captureAfter": false }` |
+| `highlightEvidence` | Store highlighted screenshot evidence | `highlightSelectors`, `highlightText`, `selector` | New | `#browserAct { "action": "highlightEvidence", "highlightSelectors": ["#data-table"], "captureAfter": true, "includeScreenshot": true }` |
 | `resumeAfterAuth` | Continue after manual sign-in | none | Conditional: only valid after `AUTH_REQUIRED`; no pending auth in smoke test | `#browserAct { "action": "resumeAfterAuth" }` |
 
 ## Wait Conditions
@@ -192,8 +196,14 @@ New actions:
 
 | Action | Purpose | Key inputs |
 |---|---|---|
+| `accessibilitySnapshot` | Return compact role/name/selector/bounds structure for choosing stable targets | `maxEntries` |
+| `mapForm` | Return field labels, names, types, required state, options, and selector hints | `selector`, `maxEntries` |
+| `watchPageChanges` | Observe mutation count, URL/title/text deltas, and new resource timings | `watchDurationMs` |
+| `highlightEvidence` | Create a screenshot with labeled boxes around important visible targets | `highlightSelectors`, `highlightText`, `selector` |
 | `recordWorkflow` | Save reusable workflow steps in browser local storage | `macroName`, `steps` |
 | `replayWorkflow` | Replay a saved workflow with optional template parameters | `macroName`, `params`, `captureBeforeAfter` |
+
+Prefer `accessibilitySnapshot` before uncertain clicks and `mapForm` before `smartFormFill`. Use `watchPageChanges` after manual sign-in, navigation, or portal blade changes when the page may still be settling. Use `highlightEvidence` for screenshots that need to show exactly which table, panel, or status marker supports the conclusion.
 
 Semantic expressions for `semanticWait` or `wait.kind=semantic`:
 

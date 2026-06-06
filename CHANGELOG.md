@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-06-06
+
+- Added `accessibilitySnapshot` for role/name-oriented page structure inspection.
+- Added `mapForm` to return form field schemas before filling complex forms.
+- Added `watchPageChanges` to observe DOM, URL, text, and resource changes over a short window.
+- Added `highlightEvidence` to generate screenshot evidence with labeled highlight boxes.
+
 ## [0.1.17] - 2026-06-06
 
 - Fixed capture redaction so top-level browser session summaries in stored Markdown and JSON are redacted consistently with page summaries.

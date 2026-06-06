@@ -269,6 +269,22 @@ async function executeSingleAction(command, allowedHosts) {
     return runVisualAssert(command, allowedHosts);
   }
 
+  if (action === 'accessibilitySnapshot') {
+    return runAccessibilitySnapshot(command, allowedHosts);
+  }
+
+  if (action === 'mapForm') {
+    return runMapForm(command, allowedHosts);
+  }
+
+  if (action === 'watchPageChanges') {
+    return runWatchPageChanges(command, allowedHosts);
+  }
+
+  if (action === 'highlightEvidence') {
+    return runHighlightEvidence(command, allowedHosts);
+  }
+
   if (action === 'recordWorkflow') {
     return runRecordWorkflow(command);
   }
@@ -1144,6 +1160,320 @@ async function runVisualAssert(command, allowedHosts) {
     failed,
     fingerprint: result?.fingerprint,
     previousFingerprint: previous
+  };
+}
+
+async function runAccessibilitySnapshot(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: input => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const isVisible = element => {
+        if (!element) {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
+      };
+      const selectorHint = element => {
+        if (element.id) {
+          return `#${CSS.escape(element.id)}`;
+        }
+        const name = element.getAttribute('name');
+        if (name) {
+          return `${element.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
+        }
+        const label = element.getAttribute('aria-label') || element.getAttribute('title');
+        if (label) {
+          return `${element.tagName.toLowerCase()}[aria-label="${CSS.escape(label)}"]`;
+        }
+        return undefined;
+      };
+      const roleFor = element => element.getAttribute('role') || ({
+        A: 'link',
+        BUTTON: 'button',
+        INPUT: element.type === 'checkbox' ? 'checkbox' : element.type === 'radio' ? 'radio' : 'textbox',
+        TEXTAREA: 'textbox',
+        SELECT: 'combobox',
+        TABLE: 'table',
+        NAV: 'navigation',
+        MAIN: 'main',
+        HEADER: 'banner',
+        FOOTER: 'contentinfo',
+        H1: 'heading',
+        H2: 'heading',
+        H3: 'heading'
+      })[element.tagName] || undefined;
+      const nameFor = element => normalize(
+        element.getAttribute('aria-label') ||
+        element.getAttribute('title') ||
+        element.labels?.[0]?.innerText ||
+        element.innerText ||
+        element.value ||
+        ''
+      ).slice(0, 180);
+      const nodes = Array.from(document.querySelectorAll('main,nav,header,footer,[role],h1,h2,h3,button,a[href],input,textarea,select,[tabindex]'))
+        .filter(isVisible)
+        .slice(0, Math.min(Math.max(Number(input.maxEntries) || 120, 1), 300))
+        .map((element, index) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            index,
+            role: roleFor(element),
+            name: nameFor(element),
+            tag: element.tagName.toLowerCase(),
+            level: /^H[1-6]$/.test(element.tagName) ? Number(element.tagName.slice(1)) : undefined,
+            selectorHint: selectorHint(element),
+            disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+            bounds: {
+              x: Math.round(rect.x),
+              y: Math.round(rect.y),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height)
+            }
+          };
+        });
+      return { ok: true, url: location.href, title: document.title, nodes };
+    },
+    args: [command]
+  });
+  return result ?? { ok: true, nodes: [] };
+}
+
+async function runMapForm(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: input => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const selectorHint = element => {
+        if (element.id) {
+          return `#${CSS.escape(element.id)}`;
+        }
+        if (element.name) {
+          return `${element.tagName.toLowerCase()}[name="${CSS.escape(element.name)}"]`;
+        }
+        return undefined;
+      };
+      const labelFor = element => {
+        if (element.labels?.[0]) {
+          return normalize(element.labels[0].innerText);
+        }
+        const aria = element.getAttribute('aria-label') || element.getAttribute('placeholder') || element.getAttribute('title');
+        if (aria) {
+          return normalize(aria);
+        }
+        const id = element.id;
+        if (id) {
+          const explicit = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+          if (explicit) {
+            return normalize(explicit.innerText);
+          }
+        }
+        return '';
+      };
+      const controls = Array.from(document.querySelectorAll(input.selector || 'input,textarea,select,[contenteditable="true"],[role="textbox"]'))
+        .slice(0, Math.min(Math.max(Number(input.maxEntries) || 120, 1), 300))
+        .map((element, index) => {
+          const tag = element.tagName.toLowerCase();
+          const type = element.getAttribute('type') || (element.isContentEditable ? 'contenteditable' : tag);
+          const options = tag === 'select'
+            ? Array.from(element.options).map(option => ({ value: option.value, text: normalize(option.textContent || '') })).slice(0, 50)
+            : undefined;
+          return {
+            index,
+            tag,
+            type,
+            name: element.getAttribute('name') || undefined,
+            id: element.id || undefined,
+            label: labelFor(element),
+            placeholder: element.getAttribute('placeholder') || undefined,
+            required: Boolean(element.required || element.getAttribute('aria-required') === 'true'),
+            disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+            readOnly: Boolean(element.readOnly),
+            autocomplete: element.getAttribute('autocomplete') || undefined,
+            selectorHint: selectorHint(element),
+            options
+          };
+        });
+      return { ok: true, url: location.href, title: document.title, fields: controls, fieldCount: controls.length };
+    },
+    args: [command]
+  });
+  return result ?? { ok: true, fields: [] };
+}
+
+async function runWatchPageChanges(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const durationMs = Math.min(Math.max(Number(command.watchDurationMs) || Number(command.durationMs) || 3000, 500), 30000);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: watchMs => new Promise(resolve => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const startedAt = new Date().toISOString();
+      const startUrl = location.href;
+      const startTitle = document.title;
+      const startText = normalize(document.body?.innerText ?? '');
+      const startResourceCount = performance.getEntriesByType('resource').length;
+      let mutationCount = 0;
+      let lastMutationAt;
+      const observer = new MutationObserver(mutations => {
+        mutationCount += mutations.length;
+        lastMutationAt = new Date().toISOString();
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+      setTimeout(() => {
+        observer.disconnect();
+        const endText = normalize(document.body?.innerText ?? '');
+        const resources = performance.getEntriesByType('resource').slice(startResourceCount).map(entry => ({
+          name: entry.name,
+          initiatorType: entry.initiatorType,
+          durationMs: Math.round(entry.duration),
+          transferSize: Number(entry.transferSize || 0)
+        })).slice(-50);
+        resolve({
+          ok: true,
+          startedAt,
+          endedAt: new Date().toISOString(),
+          durationMs: watchMs,
+          startUrl,
+          endUrl: location.href,
+          urlChanged: startUrl !== location.href,
+          titleChanged: startTitle !== document.title,
+          textDelta: endText.length - startText.length,
+          mutationCount,
+          lastMutationAt,
+          newResourceCount: resources.length,
+          resources
+        });
+      }, watchMs);
+    }),
+    args: [durationMs]
+  });
+  return result ?? { ok: true, durationMs };
+}
+
+async function runHighlightEvidence(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const [{ result: highlight }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: input => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      const isVisible = element => {
+        if (!element) {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
+      };
+      const selectors = Array.isArray(input.highlightSelectors) ? input.highlightSelectors.filter(Boolean) : [];
+      if (input.selector) {
+        selectors.unshift(input.selector);
+      }
+      const seen = new Set();
+      const targets = [];
+      for (const selector of selectors) {
+        try {
+          for (const element of Array.from(document.querySelectorAll(String(selector)))) {
+            if (!isVisible(element) || seen.has(element)) {
+              continue;
+            }
+            seen.add(element);
+            targets.push({ element, reason: selector });
+          }
+        } catch {
+          // Ignore invalid selectors.
+        }
+      }
+      const textNeedle = normalize(input.highlightText || input.targetHint || input.text).toLowerCase();
+      if (textNeedle) {
+        const candidates = Array.from(document.querySelectorAll('button,a,input,textarea,select,[role],h1,h2,h3,p,td,th,span,div'));
+        for (const element of candidates) {
+          if (!isVisible(element) || seen.has(element)) {
+            continue;
+          }
+          const label = normalize(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || '').toLowerCase();
+          if (label.includes(textNeedle)) {
+            seen.add(element);
+            targets.push({ element, reason: textNeedle });
+          }
+          if (targets.length >= 20) {
+            break;
+          }
+        }
+      }
+      const items = targets.slice(0, 20).map((item, index) => {
+        const rect = item.element.getBoundingClientRect();
+        return {
+          index: index + 1,
+          label: normalize(item.element.innerText || item.element.value || item.element.getAttribute('aria-label') || item.element.getAttribute('title') || item.reason).slice(0, 80),
+          tag: item.element.tagName.toLowerCase(),
+          reason: item.reason,
+          bounds: {
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          }
+        };
+      });
+      return {
+        ok: true,
+        viewport: { width: window.innerWidth, height: window.innerHeight, devicePixelRatio: window.devicePixelRatio || 1 },
+        highlights: items
+      };
+    },
+    args: [command]
+  });
+
+  if (!highlight?.highlights || highlight.highlights.length === 0) {
+    throw new Error('highlightEvidence found no visible targets.');
+  }
+
+  const fullDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  const blob = await fetch(fullDataUrl).then(response => response.blob());
+  const bitmap = await createImageBitmap(blob);
+  const dpr = Number(highlight.viewport?.devicePixelRatio) || 1;
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Failed to create highlight canvas context.');
+  }
+  context.drawImage(bitmap, 0, 0);
+  context.lineWidth = Math.max(3, Math.round(3 * dpr));
+  context.font = `${Math.max(14, Math.round(14 * dpr))}px sans-serif`;
+  for (const item of highlight.highlights) {
+    const x = Math.round(item.bounds.x * dpr);
+    const y = Math.round(item.bounds.y * dpr);
+    const width = Math.round(item.bounds.width * dpr);
+    const height = Math.round(item.bounds.height * dpr);
+    context.strokeStyle = '#f59e0b';
+    context.fillStyle = 'rgba(245, 158, 11, 0.16)';
+    context.fillRect(x, y, width, height);
+    context.strokeRect(x, y, width, height);
+    const label = `${item.index}. ${item.label || item.tag}`;
+    const metrics = context.measureText(label);
+    const labelY = Math.max(0, y - Math.round(22 * dpr));
+    context.fillStyle = '#111827';
+    context.fillRect(x, labelY, Math.ceil(metrics.width + 12 * dpr), Math.round(22 * dpr));
+    context.fillStyle = '#fef3c7';
+    context.fillText(label, x + Math.round(6 * dpr), labelY + Math.round(16 * dpr));
+  }
+  const highlightedBlob = await canvas.convertToBlob({ type: 'image/png' });
+  const buffer = await highlightedBlob.arrayBuffer();
+  return {
+    ok: true,
+    highlightedCount: highlight.highlights.length,
+    highlights: highlight.highlights,
+    screenshotDataUrl: `data:image/png;base64,${arrayBufferToBase64(buffer)}`,
+    screenshotMimeType: 'image/png'
   };
 }
 
