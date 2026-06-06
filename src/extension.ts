@@ -115,6 +115,11 @@ type BrowserStepInput = {
 	fallbackTexts?: string[];
 	autoHeal?: boolean;
 	targetHint?: string;
+	regionX?: number;
+	regionY?: number;
+	regionWidth?: number;
+	regionHeight?: number;
+	regionPadding?: number;
 	targetTabIndex?: number;
 	confirmDangerous?: boolean;
 	captureAfter?: boolean;
@@ -167,6 +172,8 @@ type BrowserAction =
 	| 'closeTab'
 	| 'listInteractables'
 	| 'inspectTargets'
+	| 'captureElement'
+	| 'captureRegion'
 	| 'journeyCapture'
 	| 'paginateCapture'
 	| 'smartFormFill'
@@ -232,6 +239,11 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	fallbackTexts: string[];
 	autoHeal: boolean;
 	targetHint?: string;
+	regionX?: number;
+	regionY?: number;
+	regionWidth?: number;
+	regionHeight?: number;
+	regionPadding?: number;
 	targetTabIndex?: number;
 	confirmDangerous: boolean;
 	steps: BrowserStepInput[];
@@ -608,7 +620,7 @@ async function invokeBrowserAction(context: vscode.ExtensionContext, input: Brow
 const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'readPage', 'capture', 'click', 'type', 'navigate', 'waitForText', 'wait', 'scroll', 'hover', 'keyPress',
 	'selectOption', 'clearInput', 'back', 'forward', 'reload', 'openInNewTab', 'switchTab', 'closeTab',
-	'listInteractables', 'inspectTargets', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
+	'listInteractables', 'inspectTargets', 'captureElement', 'captureRegion', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
 	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
 	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
 	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard',
@@ -704,6 +716,11 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		fallbackTexts: sanitizeStringList(input.fallbackTexts),
 		autoHeal: Boolean(input.autoHeal || input.targetHint),
 		targetHint: input.targetHint,
+		regionX: clampRegionCoordinate(input.regionX),
+		regionY: clampRegionCoordinate(input.regionY),
+		regionWidth: clampRegionSize(input.regionWidth),
+		regionHeight: clampRegionSize(input.regionHeight),
+		regionPadding: clampRegionPadding(input.regionPadding),
 		targetTabIndex: input.targetTabIndex,
 		confirmDangerous: Boolean(input.confirmDangerous),
 		steps: [...presetSteps, ...workflowSteps],
@@ -817,6 +834,19 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 
 	if (action === 'waitForText' && !step.text) {
 		throw new Error('browserAct waitForText requires text.');
+	}
+
+	if (action === 'captureElement' && !step.selector && !step.text && !step.label && !step.targetHint) {
+		throw new Error('browserAct captureElement requires selector, text, label, or targetHint.');
+	}
+
+	if (action === 'captureRegion') {
+		if (typeof step.regionX !== 'number' || typeof step.regionY !== 'number') {
+			throw new Error('browserAct captureRegion requires regionX and regionY.');
+		}
+		if (typeof step.regionWidth !== 'number' || typeof step.regionHeight !== 'number') {
+			throw new Error('browserAct captureRegion requires regionWidth and regionHeight.');
+		}
 	}
 
 	if (action === 'wait' && !step.wait?.kind) {
@@ -1034,6 +1064,30 @@ function clampMaxItems(value: number | undefined) {
 	}
 
 	return Math.min(Math.max(Math.trunc(value), 1), 200);
+}
+
+function clampRegionCoordinate(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return undefined;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), -10000), 100000);
+}
+
+function clampRegionSize(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return undefined;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), 1), 100000);
+}
+
+function clampRegionPadding(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return 0;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), 0), 200);
 }
 
 function renderBrowserActMessage(command: BrowserCommand, completion: BrowserCommandCompletion) {

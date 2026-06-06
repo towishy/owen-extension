@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-06-06
+
+- Added `captureElement` to capture screenshot evidence clipped to a target element with optional padding.
+- Added `captureRegion` to capture screenshot evidence clipped to explicit region coordinates.
+- Added `regionX`, `regionY`, `regionWidth`, `regionHeight`, and `regionPadding` inputs to `#browserAct`.
+- Added partial capture metadata (`partialCapture`) to stored evidence metadata for traceability.
+
 ## [0.1.13] - 2026-06-06
 
 - Renamed the browser extension UI label from "Owen Capture" to "Owen Browser Bridge Agent".

@@ -120,6 +120,8 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `closeTab` | Close tab | `confirmDangerous: true` | Success | `#browserAct { "action": "closeTab", "confirmDangerous": true }` |
 | `listInteractables` | Inspect clickable/focusable UI | none | Success | `#browserAct { "action": "listInteractables", "captureAfter": false }` |
 | `inspectTargets` | Rank visual/accessibility target candidates | `targetHint`, `text`, `label`, `role` | New | `#browserAct { "action": "inspectTargets", "targetHint": "Evidence tab", "captureAfter": false }` |
+| `captureElement` | Capture screenshot clipped to one element | `selector` or `targetHint`, `regionPadding` | New | `#browserAct { "action": "captureElement", "selector": "#event-card", "regionPadding": 8, "captureAfter": true }` |
+| `captureRegion` | Capture screenshot clipped to explicit rectangle | `regionX`, `regionY`, `regionWidth`, `regionHeight` | New | `#browserAct { "action": "captureRegion", "regionX": 320, "regionY": 180, "regionWidth": 760, "regionHeight": 420, "captureAfter": true }` |
 | `runWorkflow` | Execute multiple steps | `steps`, `preset` | Fails: unserializable script argument | `#browserAct { "action": "runWorkflow", "steps": [{ "action": "readPage" }, { "action": "click", "selector": "#click-target" }] }` |
 | `journeyCapture` | Visit URL list and collect summaries | `urls`, `maxPages`, `extractSelectors` | Success | `#browserAct { "action": "journeyCapture", "urls": ["http://127.0.0.1:18080/page1", "http://127.0.0.1:18080/page2"], "maxPages": 2, "extractSelectors": { "ready": "#ready-text" }, "acknowledgement": "CONFIRM_BROWSER_ACTION" }` |
 | `paginateCapture` | Follow next-page controls | `nextSelector`, `nextText`, `maxPages` | Success | `#browserAct { "action": "paginateCapture", "nextSelector": "#next-page", "maxPages": 2, "extractSelectors": { "ready": "#ready-text" } }` |
@@ -238,6 +240,16 @@ Follow these rules every time:
 
 ```text
 #browserAct { "action": "click", "targetHint": "Evidence tab", "autoHeal": true, "captureAfter": true, "investigationName": "incident-12345" } click the best matching target and report whether auto-healing was used.
+```
+
+### Capture Only One Panel Or Box
+
+```text
+#browserAct { "action": "captureElement", "targetHint": "Process Name", "regionPadding": 10, "captureAfter": true, "includeScreenshot": true, "investigationName": "incident-12345" } capture only the process panel as evidence and include its bounds.
+```
+
+```text
+#browserAct { "action": "captureRegion", "regionX": 320, "regionY": 180, "regionWidth": 760, "regionHeight": 420, "captureAfter": true, "includeScreenshot": true, "investigationName": "incident-12345" } capture only this rectangle area and summarize what is visible.
 ```
 
 ### Check Capture Quality

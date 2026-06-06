@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -177,7 +177,7 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "resumeAfterAuth", "runWorkflow"],
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "resumeAfterAuth", "runWorkflow"],
               "description": "Browser action to run. Defaults to readPage."
             },
             "selector": {
@@ -321,6 +321,26 @@
             "targetHint": {
               "type": "string",
               "description": "Natural-language target hint used by inspectTargets or auto-healing target selection."
+            },
+            "regionX": {
+              "type": "number",
+              "description": "Top-left X coordinate in CSS pixels for captureRegion."
+            },
+            "regionY": {
+              "type": "number",
+              "description": "Top-left Y coordinate in CSS pixels for captureRegion."
+            },
+            "regionWidth": {
+              "type": "number",
+              "description": "Region width in CSS pixels for captureRegion."
+            },
+            "regionHeight": {
+              "type": "number",
+              "description": "Region height in CSS pixels for captureRegion."
+            },
+            "regionPadding": {
+              "type": "number",
+              "description": "Optional padding in CSS pixels for captureElement or captureRegion."
             },
             "targetTabIndex": {
               "type": "number",

@@ -83,8 +83,9 @@ async function executeBrowserCommand(command, options) {
     }
 
     const currentTab = await getActiveTab();
+    const screenshotOverride = extractScreenshotOverride(executionTrail);
     const capture = command.captureAfter || command.action === 'capture'
-      ? await createCapturePayload(currentTab, command, options)
+      ? await createCapturePayload(currentTab, command, options, screenshotOverride)
       : undefined;
     const browserSession = capture?.browserSession ?? await buildBrowserSessionState(currentTab, command, undefined, false);
     await rememberBrowserState(browserSession);
@@ -324,6 +325,14 @@ async function executeSingleAction(command, allowedHosts) {
       args: [buildTargetIntent(command)]
     });
     return result ?? { ok: true, rankedTargets: [] };
+  }
+
+  if (action === 'captureElement') {
+    return runCaptureElement(command, allowedHosts);
+  }
+
+  if (action === 'captureRegion') {
+    return runCaptureRegion(command, allowedHosts);
   }
 
   const targets = buildTargetCandidates(command);
@@ -641,6 +650,71 @@ async function runSafeDownloadAndHash(command, allowedHosts) {
     throw new Error(result.error);
   }
   return result ?? { ok: true };
+}
+
+async function runCaptureElement(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+
+  const [{ result: targetResult }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: resolveCaptureElementRegion,
+    args: [{
+      selector: command.selector,
+      text: command.text,
+      label: command.label,
+      role: command.role,
+      index: command.index,
+      targetHint: command.targetHint,
+      regionPadding: command.regionPadding
+    }]
+  });
+
+  if (targetResult?.error) {
+    throw new Error(targetResult.error);
+  }
+
+  const clipped = await captureRegionImage(tab.windowId, targetResult.region);
+  return {
+    ok: true,
+    screenshotDataUrl: clipped.dataUrl,
+    screenshotMimeType: 'image/png',
+    captureRegion: targetResult.region,
+    captureTarget: targetResult.target
+  };
+}
+
+async function runCaptureRegion(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+
+  const [{ result: metrics }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => ({
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio || 1
+    })
+  });
+
+  const region = normalizeCaptureRegion({
+    x: command.regionX,
+    y: command.regionY,
+    width: command.regionWidth,
+    height: command.regionHeight,
+    padding: command.regionPadding,
+    viewportWidth: metrics?.viewportWidth,
+    viewportHeight: metrics?.viewportHeight,
+    devicePixelRatio: metrics?.devicePixelRatio
+  });
+
+  const clipped = await captureRegionImage(tab.windowId, region);
+  return {
+    ok: true,
+    screenshotDataUrl: clipped.dataUrl,
+    screenshotMimeType: 'image/png',
+    captureRegion: region
+  };
 }
 
 async function runTableExtract(command, allowedHosts) {
@@ -1204,6 +1278,33 @@ function buildTargetIntent(command) {
   };
 }
 
+function extractScreenshotOverride(executionTrail) {
+  if (!Array.isArray(executionTrail)) {
+    return undefined;
+  }
+
+  for (let i = executionTrail.length - 1; i >= 0; i -= 1) {
+    const result = executionTrail[i]?.result;
+    if (!result || typeof result !== 'object') {
+      continue;
+    }
+
+    if (typeof result.screenshotDataUrl === 'string' && result.screenshotDataUrl.startsWith('data:image/')) {
+      return {
+        dataUrl: result.screenshotDataUrl,
+        mimeType: result.screenshotMimeType || 'image/png',
+        pageMetadata: {
+          action: executionTrail[i]?.action,
+          captureRegion: result.captureRegion,
+          captureTarget: result.captureTarget
+        }
+      };
+    }
+  }
+
+  return undefined;
+}
+
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (hasTabId(tab)) {
@@ -1338,7 +1439,7 @@ async function captureCurrentTab() {
   return body;
 }
 
-async function createCapturePayload(tab, command, options) {
+async function createCapturePayload(tab, command, options, screenshotOverride) {
   const includeHtml = command.includeHtml ?? options.includeHtml;
   const includeScreenshot = command.includeScreenshot ?? options.includeScreenshot;
   const [{ result: pageSnapshot }] = await chrome.scripting.executeScript({
@@ -1348,9 +1449,18 @@ async function createCapturePayload(tab, command, options) {
   });
 
   let screenshot;
-  if (includeScreenshot) {
+  if (screenshotOverride?.dataUrl) {
+    screenshot = { dataUrl: screenshotOverride.dataUrl, mimeType: screenshotOverride.mimeType || 'image/png' };
+  } else if (includeScreenshot) {
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
     screenshot = { dataUrl, mimeType: 'image/png' };
+  }
+
+  if (screenshotOverride?.pageMetadata && pageSnapshot?.metadata && typeof pageSnapshot.metadata === 'object') {
+    pageSnapshot.metadata = {
+      ...pageSnapshot.metadata,
+      partialCapture: screenshotOverride.pageMetadata
+    };
   }
 
   const browserSession = await buildBrowserSessionState(tab, command, pageSnapshot.screenSummary, Boolean(screenshot));
@@ -2063,6 +2173,180 @@ function inspectTargetsOnPage(intent) {
     .slice(0, 25);
 
   return { ok: true, intent, rankedTargets };
+}
+
+function normalizeCaptureRegion(input) {
+  const viewportWidth = Math.max(1, Number(input.viewportWidth) || 1);
+  const viewportHeight = Math.max(1, Number(input.viewportHeight) || 1);
+  const devicePixelRatio = Number(input.devicePixelRatio) || 1;
+  const padding = Math.max(0, Number(input.padding) || 0);
+
+  let x = Number(input.x) || 0;
+  let y = Number(input.y) || 0;
+  let width = Number(input.width) || 1;
+  let height = Number(input.height) || 1;
+
+  x -= padding;
+  y -= padding;
+  width += padding * 2;
+  height += padding * 2;
+
+  x = Math.max(0, Math.min(x, viewportWidth - 1));
+  y = Math.max(0, Math.min(y, viewportHeight - 1));
+  width = Math.max(1, Math.min(width, viewportWidth - x));
+  height = Math.max(1, Math.min(height, viewportHeight - y));
+
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(width),
+    height: Math.round(height),
+    viewportWidth: Math.round(viewportWidth),
+    viewportHeight: Math.round(viewportHeight),
+    devicePixelRatio,
+    padding
+  };
+}
+
+async function captureRegionImage(windowId, region) {
+  const fullDataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+  const blob = await fetch(fullDataUrl).then(response => response.blob());
+  const bitmap = await createImageBitmap(blob);
+  const dpr = Number(region?.devicePixelRatio) || 1;
+  const sx = Math.max(0, Math.round((Number(region?.x) || 0) * dpr));
+  const sy = Math.max(0, Math.round((Number(region?.y) || 0) * dpr));
+  const sw = Math.max(1, Math.round((Number(region?.width) || 1) * dpr));
+  const sh = Math.max(1, Math.round((Number(region?.height) || 1) * dpr));
+  const clippedWidth = Math.min(sw, Math.max(1, bitmap.width - sx));
+  const clippedHeight = Math.min(sh, Math.max(1, bitmap.height - sy));
+
+  const canvas = new OffscreenCanvas(clippedWidth, clippedHeight);
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Failed to create 2D context for region capture.');
+  }
+
+  context.drawImage(bitmap, sx, sy, clippedWidth, clippedHeight, 0, 0, clippedWidth, clippedHeight);
+  const clippedBlob = await canvas.convertToBlob({ type: 'image/png' });
+  const buffer = await clippedBlob.arrayBuffer();
+  return {
+    dataUrl: `data:image/png;base64,${arrayBufferToBase64(buffer)}`
+  };
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
+}
+
+function resolveCaptureElementRegion(input) {
+  const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const normalizeLower = value => normalize(value).toLowerCase();
+  const normalizeRegionLocal = raw => {
+    const viewportWidth = Math.max(1, Number(raw.viewportWidth) || 1);
+    const viewportHeight = Math.max(1, Number(raw.viewportHeight) || 1);
+    const devicePixelRatio = Number(raw.devicePixelRatio) || 1;
+    const padding = Math.max(0, Number(raw.padding) || 0);
+
+    let x = Number(raw.x) || 0;
+    let y = Number(raw.y) || 0;
+    let width = Number(raw.width) || 1;
+    let height = Number(raw.height) || 1;
+
+    x -= padding;
+    y -= padding;
+    width += padding * 2;
+    height += padding * 2;
+
+    x = Math.max(0, Math.min(x, viewportWidth - 1));
+    y = Math.max(0, Math.min(y, viewportHeight - 1));
+    width = Math.max(1, Math.min(width, viewportWidth - x));
+    height = Math.max(1, Math.min(height, viewportHeight - y));
+
+    return {
+      x: Math.round(x),
+      y: Math.round(y),
+      width: Math.round(width),
+      height: Math.round(height),
+      viewportWidth: Math.round(viewportWidth),
+      viewportHeight: Math.round(viewportHeight),
+      devicePixelRatio,
+      padding
+    };
+  };
+  const isVisible = element => {
+    if (!element) {
+      return false;
+    }
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+      return false;
+    }
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+
+  const findTarget = () => {
+    if (input?.selector) {
+      return document.querySelector(input.selector);
+    }
+
+    const roleQuery = input?.role ? `[role="${input.role}"]` : 'button,[role="button"],[role="tab"],a[href],input,textarea,select,[tabindex]';
+    const elements = Array.from(document.querySelectorAll(roleQuery)).filter(isVisible);
+    const labelNeedle = normalizeLower(input?.label);
+    if (labelNeedle) {
+      const matches = elements.filter(element => normalizeLower(element.getAttribute('aria-label') || element.getAttribute('title') || '').includes(labelNeedle));
+      if (matches.length > 0) {
+        return matches[Math.max(0, Math.min(Number(input?.index) || 0, matches.length - 1))];
+      }
+    }
+
+    const textNeedle = normalizeLower(input?.targetHint || input?.text);
+    if (!textNeedle) {
+      return undefined;
+    }
+    const matches = elements.filter(element => normalizeLower(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || '').includes(textNeedle));
+    if (matches.length === 0) {
+      return undefined;
+    }
+    return matches[Math.max(0, Math.min(Number(input?.index) || 0, matches.length - 1))];
+  };
+
+  const target = findTarget();
+  if (!target || !isVisible(target)) {
+    return { error: 'captureElement target not found.' };
+  }
+
+  target.scrollIntoView({ block: 'center', inline: 'center' });
+  const rect = target.getBoundingClientRect();
+  const region = normalizeRegionLocal({
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+    padding: input?.regionPadding,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio || 1
+  });
+
+  const selectorHint = target.id ? `#${CSS.escape(target.id)}` : undefined;
+  return {
+    ok: true,
+    region,
+    target: {
+      tag: target.tagName.toLowerCase(),
+      role: target.getAttribute('role') || undefined,
+      text: normalize(target.innerText || target.value || target.getAttribute('aria-label') || target.getAttribute('title') || '').slice(0, 180),
+      selectorHint
+    }
+  };
 }
 
 function normalizeText(value) {

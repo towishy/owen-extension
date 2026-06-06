@@ -31,7 +31,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.13.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.14.vsix --force
 ```
 
 macOS terminal:
@@ -180,9 +180,19 @@ For paired browser control:
 
 `#browserAct` supports `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, text sample, and capture quality. Actions are delivered through the paired browser extension, limited to **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are available for richer automation: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are available for richer automation: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` also supports resilient workflow and traversal inputs: `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `targetHint`, `urls`, `maxPages`, `nextSelector`, `nextText`, `extractSelectors`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, and `policyProfile`.
+`#browserAct` also supports resilient workflow and traversal inputs: `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `targetHint`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `nextSelector`, `nextText`, `extractSelectors`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, and `policyProfile`.
+
+Partial evidence capture examples:
+
+```text
+#browserAct { "action": "captureElement", "targetHint": "Process Name", "regionPadding": 10, "captureAfter": true, "includeScreenshot": true, "investigationName": "case-001" } 특정 프로세스 박스만 캡처해줘.
+```
+
+```text
+#browserAct { "action": "captureRegion", "regionX": 300, "regionY": 220, "regionWidth": 860, "regionHeight": 480, "captureAfter": true, "includeScreenshot": true, "investigationName": "case-001" } 지정한 영역만 캡처해줘.
+```
 
 URL traversal example:
 

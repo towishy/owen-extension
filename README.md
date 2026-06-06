@@ -11,6 +11,12 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
+## New in 0.1.14
+
+- Added `captureElement` for selector/targetHint-based panel or box evidence capture.
+- Added `captureRegion` for explicit rectangle evidence capture by coordinates.
+- Added region inputs: `regionX`, `regionY`, `regionWidth`, `regionHeight`, and `regionPadding`.
+
 ## New in 0.1.13
 
 - Browser extension display name is now "Owen Browser Bridge Agent" in the extension list and popup.
@@ -30,6 +36,7 @@ The initial target is Defender, Entra, Azure portal, and similar security invest
 - Selected text
 - Page headings, visible buttons/links, viewport data, and meta tags
 - Capture quality score and findings for auth/loading/low-evidence states
+- Optional element-only or region-only clipped screenshot evidence
 - Optional HTML snapshot
 - Optional visible-tab PNG screenshot
 
@@ -61,7 +68,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.13.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.14.vsix --force
 ```
 
 macOS terminal:
@@ -71,7 +78,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.13.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.14.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -195,9 +202,21 @@ For paired browser control on allowed hosts:
 
 Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, text sample, and capture quality. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` supports `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `targetHint`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, checkpoint rollback, manual review gates, and policy checks.
+`#browserAct` supports `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `targetHint`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, capture element/region evidence, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, checkpoint rollback, manual review gates, and policy checks.
+
+Example: capture only a target panel
+
+```text
+#browserAct { "action": "captureElement", "selector": "[data-testid='event-panel']", "regionPadding": 8, "captureAfter": true, "includeScreenshot": true, "investigationName": "incident-12345" } 이 패널만 증적 이미지로 캡처하고 핵심 내용을 요약해줘.
+```
+
+Example: capture only a fixed region
+
+```text
+#browserAct { "action": "captureRegion", "regionX": 420, "regionY": 180, "regionWidth": 760, "regionHeight": 420, "captureAfter": true, "includeScreenshot": true, "investigationName": "incident-12345" } 지정한 프레임 영역만 증적으로 캡처해줘.
+```
 
 `ocrSnapshot` returns screenshot plus DOM text hints. True OCR engine embedding is not included in this runtime.
 
