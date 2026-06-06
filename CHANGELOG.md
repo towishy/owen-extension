@@ -6,6 +6,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-06-06
+
+- Fixed capture redaction so top-level browser session summaries in stored Markdown and JSON are redacted consistently with page summaries.
+
 ## [0.1.16] - 2026-06-06
 
 - Added `visualAssert` for post-action text, selector, and page fingerprint assertions.

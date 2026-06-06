@@ -529,7 +529,7 @@ async function storeCapture(context: vscode.ExtensionContext, payload: BrowserCa
 		collectedAt
 	};
 	await updateCaptureGroupFiles(folder, stored);
-	await updateLatestBrowserState(context, payload.browserSession, stored);
+	await updateLatestBrowserState(context, redactedPayload.browserSession, stored);
 	output.appendLine(`Stored capture ${id}: ${markdownPath}`);
 
 	return stored;
@@ -2147,6 +2147,7 @@ function sanitizePathSegment(value: string) {
 
 function redactPayload(payload: BrowserCapturePayload): BrowserCapturePayload {
 	const copy = JSON.parse(JSON.stringify(payload)) as BrowserCapturePayload;
+	copy.browserSession = redactUnknown(copy.browserSession) as BrowserSessionState | undefined;
 	if (copy.page) {
 		copy.page.url = redactText(copy.page.url);
 		copy.page.title = redactText(copy.page.title);
