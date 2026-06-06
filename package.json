@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -174,7 +174,7 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "waitPreset", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "visualAssert", "accessibilitySnapshot", "mapForm", "watchPageChanges", "highlightEvidence", "buildEvidencePack", "buildNavigationGraph", "assertPageContract", "createHandoff", "selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "replayWorkflow", "resumeAfterAuth", "runWorkflow"],
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "waitPreset", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "visualAssert", "accessibilitySnapshot", "mapForm", "watchPageChanges", "highlightEvidence", "planAndRun", "evidenceClaimCheck", "tableWatchAndDiff", "browserRunBundle", "buildEvidencePack", "buildNavigationGraph", "assertPageContract", "createHandoff", "selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "replayWorkflow", "resumeAfterAuth", "runWorkflow"],
               "description": "Browser action to run. Defaults to readPage."
             },
             "selector": {
@@ -383,6 +383,19 @@
               "type": "string",
               "description": "Visible text used to find evidence targets for highlightEvidence."
             },
+            "goal": {
+              "type": "string",
+              "description": "Natural-language goal for planAndRun."
+            },
+            "claim": {
+              "type": "string",
+              "description": "Evidence claim to check against the current page for evidenceClaimCheck."
+            },
+            "keyColumns": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Column names used as stable row keys for tableWatchAndDiff."
+            },
             "waitPreset": {
               "type": "string",
               "enum": ["defenderIncidentReady", "azureBladeReady", "entraTableReady", "genericPortalReady"],
@@ -404,7 +417,7 @@
             },
             "captureGroup": {
               "type": "string",
-              "description": "Capture group or host/group path for buildEvidencePack."
+              "description": "Capture group or host/group path for buildEvidencePack or browserRunBundle."
             },
             "jobName": {
               "type": "string",

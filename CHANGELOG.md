@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-06-06
+
+- Added `planAndRun` for guarded goal-driven browser workflows.
+- Added `evidenceClaimCheck` to compare report claims with visible page and table evidence.
+- Added `tableWatchAndDiff` for row-level table change detection.
+- Added `browserRunBundle` to assemble capture-group run bundle artifacts.
+
 ## [0.1.19] - 2026-06-06
 
 - Added `buildEvidencePack` to assemble capture-group evidence pack Markdown/JSON artifacts.

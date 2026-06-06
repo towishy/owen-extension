@@ -168,6 +168,9 @@ type BrowserStepInput = {
 	watchDurationMs?: number;
 	highlightSelectors?: string[];
 	highlightText?: string;
+	goal?: string;
+	claim?: string;
+	keyColumns?: string[];
 	waitPreset?: 'defenderIncidentReady' | 'azureBladeReady' | 'entraTableReady' | 'genericPortalReady';
 	contractName?: string;
 	contractSelectors?: string[];
@@ -227,6 +230,10 @@ type BrowserAction =
 	| 'mapForm'
 	| 'watchPageChanges'
 	| 'highlightEvidence'
+	| 'planAndRun'
+	| 'evidenceClaimCheck'
+	| 'tableWatchAndDiff'
+	| 'browserRunBundle'
 	| 'buildEvidencePack'
 	| 'buildNavigationGraph'
 	| 'assertPageContract'
@@ -329,6 +336,9 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	watchDurationMs: number;
 	highlightSelectors: string[];
 	highlightText?: string;
+	goal?: string;
+	claim?: string;
+	keyColumns: string[];
 	waitPreset?: 'defenderIncidentReady' | 'azureBladeReady' | 'entraTableReady' | 'genericPortalReady';
 	contractName?: string;
 	contractSelectors: string[];
@@ -715,7 +725,7 @@ const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
 	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
 	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'visualAssert', 'accessibilitySnapshot', 'mapForm',
-	'watchPageChanges', 'highlightEvidence', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
+	'watchPageChanges', 'highlightEvidence', 'planAndRun', 'evidenceClaimCheck', 'tableWatchAndDiff', 'browserRunBundle', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
 	'captureReviewQueue', 'startBrowserJob', 'getBrowserJob', 'cancelBrowserJob', 'recordWorkflow', 'replayWorkflow',
 	'resumeAfterAuth', 'runWorkflow'
 ];
@@ -838,6 +848,9 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		watchDurationMs: clampWatchDurationMs(input.watchDurationMs),
 		highlightSelectors: sanitizeStringList(input.highlightSelectors),
 		highlightText: input.highlightText,
+		goal: input.goal,
+		claim: input.claim,
+		keyColumns: sanitizeStringList(input.keyColumns),
 		waitPreset: input.waitPreset,
 		contractName: input.contractName,
 		contractSelectors: sanitizeStringList(input.contractSelectors),
@@ -1058,8 +1071,20 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 		throw new Error('browserAct highlightEvidence requires selector, text, targetHint, highlightSelectors, or highlightText.');
 	}
 
+	if (action === 'planAndRun' && !step.goal && (!Array.isArray(step.steps) || step.steps.length === 0)) {
+		throw new Error('browserAct planAndRun requires goal or steps.');
+	}
+
+	if (action === 'evidenceClaimCheck' && !step.claim) {
+		throw new Error('browserAct evidenceClaimCheck requires claim.');
+	}
+
 	if (action === 'buildEvidencePack' && !step.captureGroup && !step.investigationName) {
 		throw new Error('browserAct buildEvidencePack requires captureGroup or investigationName.');
+	}
+
+	if (action === 'browserRunBundle' && !step.captureGroup && !step.investigationName) {
+		throw new Error('browserAct browserRunBundle requires captureGroup or investigationName.');
 	}
 
 	if (action === 'assertPageContract' && !step.contractName && (!Array.isArray(step.contractSelectors) || step.contractSelectors.length === 0) && (!Array.isArray(step.contractTexts) || step.contractTexts.length === 0)) {
@@ -1146,6 +1171,11 @@ async function writeBrowserCommandArtifacts(context: vscode.ExtensionContext, co
 
 	if (action === 'createHandoff' || action === 'captureReviewQueue' || action === 'selectorHealthReport') {
 		await writeBrowserReportArtifact(context, action, stepResult);
+		return;
+	}
+
+	if (action === 'browserRunBundle') {
+		await writeBrowserRunBundle(context, stepResult, completion);
 	}
 }
 
@@ -2460,6 +2490,41 @@ async function writeBrowserReportArtifact(context: vscode.ExtensionContext, acti
 	await fs.writeFile(path.join(folder, `${id}.md`), renderBrowserReportMarkdown(action, stepResult), 'utf8');
 }
 
+async function writeBrowserRunBundle(context: vscode.ExtensionContext, stepResult: Record<string, unknown>, completion: BrowserCommandCompletion) {
+	const captureGroup = String(stepResult.captureGroup ?? '').trim();
+	const baseDir = await getCaptureBaseDir(context);
+	const groupFolder = await findCaptureGroupFolder(baseDir, captureGroup);
+	if (!groupFolder) {
+		throw new Error(`Browser run bundle capture group not found: ${captureGroup}`);
+	}
+
+	const summary = await readCaptureGroup(groupFolder);
+	const actionLogs = await readRecentActionLogEntries(baseDir, 200);
+	const relatedLogs = actionLogs.filter(entry => {
+		const stored = entry.storedCapture as Record<string, unknown> | undefined;
+		return stored?.groupName === summary.groupName || String(stored?.markdownPath ?? '').startsWith(groupFolder);
+	});
+	const bundleId = `browser-run-bundle-${formatTimestamp(new Date().toISOString())}`;
+	const bundleFolder = path.join(groupFolder, '_run-bundles', bundleId);
+	await fs.mkdir(bundleFolder, { recursive: true });
+	const manifest = {
+		bundleId,
+		generatedAt: new Date().toISOString(),
+		requestedByCommand: completion.id,
+		captureGroup: summary,
+		actionLogCount: relatedLogs.length,
+		actionLogs: relatedLogs,
+		latestCommandResult: stepResult,
+		artifacts: {
+			evidencePackJson: path.join(groupFolder, '_evidence-pack.json'),
+			evidencePackMarkdown: path.join(groupFolder, '_evidence-pack.md')
+		}
+	};
+	await fs.writeFile(path.join(bundleFolder, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+	await fs.writeFile(path.join(bundleFolder, 'README.md'), renderBrowserRunBundleMarkdown(manifest), 'utf8');
+	await fs.writeFile(path.join(bundleFolder, 'action-logs.json'), JSON.stringify(relatedLogs, null, 2), 'utf8');
+}
+
 async function findCaptureGroupFolder(baseDir: string, captureGroup: string) {
 	if (!captureGroup) {
 		const entries = await fs.readdir(baseDir, { withFileTypes: true }).catch(() => []);
@@ -2556,6 +2621,27 @@ function renderNavigationGraphMarkdown(graph: Record<string, unknown>) {
 
 function renderBrowserReportMarkdown(action: string, report: Record<string, unknown>) {
 	return ['# Browser Report', '', `Action: ${action}`, `Generated: ${new Date().toISOString()}`, '', '```json', JSON.stringify(report, null, 2), '```', ''].join('\n');
+}
+
+function renderBrowserRunBundleMarkdown(bundle: { bundleId: string; generatedAt: string; captureGroup: CaptureGroupSummary; actionLogCount: number; latestCommandResult: Record<string, unknown> }) {
+	const lines = [
+		'# Browser Run Bundle',
+		'',
+		`Bundle: ${bundle.bundleId}`,
+		`Generated: ${bundle.generatedAt}`,
+		`Host: ${bundle.captureGroup.host}`,
+		`Group: ${bundle.captureGroup.groupName}`,
+		`Captures: ${bundle.captureGroup.captureCount}`,
+		`Action logs: ${bundle.actionLogCount}`,
+		'',
+		'## Captures',
+		''
+	];
+	for (const capture of bundle.captureGroup.captures) {
+		lines.push(`- ${capture.collectedAt} - ${path.basename(capture.markdownPath)} - ${capture.title ?? capture.id}`);
+	}
+	lines.push('', '## Latest Command Result', '', '```json', JSON.stringify(bundle.latestCommandResult, null, 2), '```', '');
+	return lines.join('\n');
 }
 
 function decodeDataUrl(dataUrl: string) {

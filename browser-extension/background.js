@@ -286,6 +286,22 @@ async function executeSingleAction(command, allowedHosts) {
     return runHighlightEvidence(command, allowedHosts);
   }
 
+  if (action === 'planAndRun') {
+    return runPlanAndRun(command, allowedHosts);
+  }
+
+  if (action === 'evidenceClaimCheck') {
+    return runEvidenceClaimCheck(command, allowedHosts);
+  }
+
+  if (action === 'tableWatchAndDiff') {
+    return runTableWatchAndDiff(command, allowedHosts);
+  }
+
+  if (action === 'browserRunBundle') {
+    return runBrowserRunBundle(command, allowedHosts);
+  }
+
   if (action === 'buildEvidencePack') {
     return runBuildEvidencePack(command, allowedHosts);
   }
@@ -1530,6 +1546,184 @@ async function runBuildEvidencePack(command, allowedHosts) {
     title: tab.title,
     historyRunCount: executionRunHistory.size,
     message: 'Evidence pack file assembly is completed by the VS Code extension after this command result is logged.'
+  };
+}
+
+async function runPlanAndRun(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const goal = String(command.goal || command.text || '').trim();
+  const generatedPlan = [{ action: 'waitPreset', waitPreset: command.waitPreset || 'genericPortalReady' }];
+
+  if (command.contractName || command.contractSelectors?.length || command.contractTexts?.length) {
+    generatedPlan.push({
+      action: 'assertPageContract',
+      contractName: command.contractName,
+      contractSelectors: command.contractSelectors,
+      contractTexts: command.contractTexts
+    });
+  }
+
+  if (command.tableSelector || /table|row|grid|표|테이블/i.test(goal)) {
+    generatedPlan.push({
+      action: 'tableExtract',
+      tableSelector: command.tableSelector,
+      headerMode: command.headerMode || 'auto',
+      outputFormat: 'json'
+    });
+  }
+
+  if (command.highlightSelectors?.length || command.highlightText || command.selector || command.targetHint) {
+    generatedPlan.push({
+      action: 'highlightEvidence',
+      selector: command.selector,
+      targetHint: command.targetHint,
+      highlightSelectors: command.highlightSelectors,
+      highlightText: command.highlightText
+    });
+  }
+
+  const explicitSteps = Array.isArray(command.steps) ? command.steps.slice(0, 20) : [];
+  const steps = [...generatedPlan, ...explicitSteps];
+  const results = [];
+  for (const step of steps) {
+    const result = await executeSingleAction({ ...command, ...step, action: step.action || 'readPage' }, allowedHosts);
+    results.push({ action: step.action || 'readPage', result });
+    if (result?.ok === false || result?.error) {
+      break;
+    }
+  }
+
+  return {
+    ok: results.every(item => item.result?.ok !== false && !item.result?.error),
+    goal,
+    generatedPlan,
+    explicitStepCount: explicitSteps.length,
+    steps: results
+  };
+}
+
+async function runEvidenceClaimCheck(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const claim = String(command.claim || '').trim();
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: (claimInput, tableSelector) => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const bodyText = normalize(document.body?.innerText || '');
+      const lowerText = bodyText.toLowerCase();
+      const terms = Array.from(new Set(normalize(claimInput).toLowerCase().split(/[^a-z0-9가-힣_.-]+/).filter(term => term.length >= 3))).slice(0, 40);
+      const matchedTerms = terms.filter(term => lowerText.includes(term));
+      const missingTerms = terms.filter(term => !lowerText.includes(term));
+      const tables = Array.from(tableSelector ? document.querySelectorAll(tableSelector) : document.querySelectorAll('table,[role="table"],[role="grid"]')).slice(0, 5);
+      const tableMatches = tables.map((table, tableIndex) => {
+        const rows = Array.from(table.querySelectorAll('tr,[role="row"]')).slice(0, 50).map((row, rowIndex) => ({
+          rowIndex,
+          text: normalize(row.textContent || '')
+        }));
+        const matches = rows.filter(row => matchedTerms.some(term => row.text.toLowerCase().includes(term))).slice(0, 10);
+        return { tableIndex, rowCount: rows.length, matches };
+      });
+      const evidenceSnippets = matchedTerms.slice(0, 10).map(term => {
+        const index = lowerText.indexOf(term);
+        return { term, snippet: index >= 0 ? bodyText.slice(Math.max(0, index - 80), Math.min(bodyText.length, index + 120)) : '' };
+      });
+      const supportRatio = terms.length ? matchedTerms.length / terms.length : 0;
+      const verdict = supportRatio >= 0.65 ? 'supported' : 'notEnoughEvidence';
+      return { ok: true, claim: claimInput, verdict, supportRatio, matchedTerms, missingTerms, evidenceSnippets, tableMatches };
+    },
+    args: [claim, command.tableSelector]
+  });
+  return result || { ok: false, claim, verdict: 'notEnoughEvidence' };
+}
+
+async function runTableWatchAndDiff(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const durationMs = Math.min(Math.max(Number(command.watchDurationMs || command.durationMs) || 2000, 500), 30000);
+  const before = await snapshotTable(tab.id, command);
+  await new Promise(resolve => setTimeout(resolve, durationMs));
+  const after = await snapshotTable(tab.id, command);
+  const diff = diffTableSnapshots(before, after, Array.isArray(command.keyColumns) ? command.keyColumns : []);
+  return { ok: true, generatedAt: new Date().toISOString(), durationMs, before, after, diff };
+}
+
+async function snapshotTable(tabId, command) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (tableSelector, headerMode) => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const table = tableSelector ? document.querySelector(tableSelector) : document.querySelector('table,[role="table"],[role="grid"]');
+      if (!table) {
+        return { ok: false, error: 'Table not found.', headers: [], rows: [] };
+      }
+
+      const rowElements = Array.from(table.querySelectorAll('tr,[role="row"]'));
+      const hasThead = table.querySelectorAll('thead th').length > 0;
+      const mode = headerMode || 'auto';
+      const headerCells = mode === 'thead' || (mode === 'auto' && hasThead)
+        ? Array.from(table.querySelectorAll('thead th'))
+        : Array.from(rowElements[0]?.querySelectorAll('th,td,[role="columnheader"],[role="cell"]') || []);
+      const headers = headerCells.map((cell, index) => normalize(cell.textContent || '') || `col_${index + 1}`);
+      const dataRows = mode === 'firstRow' || (!hasThead && mode === 'auto') ? rowElements.slice(1) : rowElements;
+      const rows = dataRows.map((row, rowIndex) => {
+        const cells = Array.from(row.querySelectorAll('td,th,[role="cell"],[role="gridcell"]')).map(cell => normalize(cell.textContent || ''));
+        const record = {};
+        headers.forEach((header, index) => { record[header] = cells[index] || ''; });
+        return { rowIndex, key: cells.join('|'), cells, record };
+      }).filter(row => row.cells.length > 0);
+      return { ok: true, capturedAt: new Date().toISOString(), headers, rowCount: rows.length, rows };
+    },
+    args: [command.tableSelector, command.headerMode]
+  });
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+  return result || { ok: true, headers: [], rows: [] };
+}
+
+function diffTableSnapshots(before, after, keyColumns) {
+  const keyFor = row => {
+    const record = row.record || {};
+    const configured = keyColumns.map(column => String(record[column] || '')).filter(Boolean);
+    return configured.length > 0 ? configured.join('|') : row.key || String(row.rowIndex);
+  };
+  const beforeMap = new Map((before.rows || []).map(row => [keyFor(row), row]));
+  const afterMap = new Map((after.rows || []).map(row => [keyFor(row), row]));
+  const added = [];
+  const removed = [];
+  const changed = [];
+  for (const [key, row] of afterMap) {
+    if (!beforeMap.has(key)) {
+      added.push(row);
+      continue;
+    }
+    const previous = beforeMap.get(key);
+    if (JSON.stringify(previous?.record || previous?.cells) !== JSON.stringify(row.record || row.cells)) {
+      changed.push({ key, before: previous, after: row });
+    }
+  }
+  for (const [key, row] of beforeMap) {
+    if (!afterMap.has(key)) {
+      removed.push(row);
+    }
+  }
+  return { stable: added.length === 0 && removed.length === 0 && changed.length === 0, added, removed, changed };
+}
+
+async function runBrowserRunBundle(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  const captureGroup = String(command.captureGroup || command.investigationName || '').trim();
+  return {
+    ok: true,
+    captureGroup,
+    generatedAt: new Date().toISOString(),
+    url: tab.url,
+    title: tab.title,
+    historyRunCount: executionRunHistory.size,
+    message: 'Browser run bundle folder is assembled by the VS Code extension after this command result is logged.'
   };
 }
 

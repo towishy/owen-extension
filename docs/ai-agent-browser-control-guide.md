@@ -148,6 +148,10 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `mapForm` | Return form field schema before filling | `selector`, `maxEntries` | New | `#browserAct { "action": "mapForm", "captureAfter": false }` |
 | `watchPageChanges` | Observe short-window DOM, URL, text, and resource changes | `watchDurationMs` | New | `#browserAct { "action": "watchPageChanges", "watchDurationMs": 2500, "captureAfter": false }` |
 | `highlightEvidence` | Store highlighted screenshot evidence | `highlightSelectors`, `highlightText`, `selector` | New | `#browserAct { "action": "highlightEvidence", "highlightSelectors": ["#data-table"], "captureAfter": true, "includeScreenshot": true }` |
+| `planAndRun` | Generate and run a guarded workflow from a goal | `goal`, `steps`, `waitPreset`, `contractSelectors` | New | `#browserAct { "action": "planAndRun", "goal": "verify the evidence table", "tableSelector": "#data-table", "captureAfter": false }` |
+| `evidenceClaimCheck` | Check a report claim against visible page/table evidence | `claim`, `tableSelector` | New | `#browserAct { "action": "evidenceClaimCheck", "claim": "Alpha is Open", "tableSelector": "#data-table" }` |
+| `tableWatchAndDiff` | Watch a table and return row-level diff | `tableSelector`, `keyColumns`, `watchDurationMs` | New | `#browserAct { "action": "tableWatchAndDiff", "tableSelector": "#data-table", "keyColumns": ["Name"], "watchDurationMs": 1500 }` |
+| `browserRunBundle` | Assemble a capture-group run bundle | `captureGroup` | New | `#browserAct { "action": "browserRunBundle", "captureGroup": "case-001", "captureAfter": false }` |
 | `waitPreset` | Wait for named portal readiness conditions | `waitPreset` | New | `#browserAct { "action": "waitPreset", "waitPreset": "genericPortalReady", "captureAfter": false }` |
 | `assertPageContract` | Verify expected page selectors/texts | `contractName`, `contractSelectors`, `contractTexts` | New | `#browserAct { "action": "assertPageContract", "contractSelectors": ["#data-table"], "contractTexts": ["READY_MARKER"] }` |
 | `buildEvidencePack` | Write capture-group evidence pack files | `captureGroup` | New | `#browserAct { "action": "buildEvidencePack", "captureGroup": "case-001", "captureAfter": false }` |
@@ -193,6 +197,9 @@ Use these inputs with `#browserAct` for higher reliability on modern web apps:
 | `captureBeforeAfter` | Adds lightweight before/after DOM diff metadata |
 | `macroName` | Macro identifier for `recordWorkflow` and `replayWorkflow` |
 | `params` | Template values for replay (`{{key}}`) |
+| `goal` | Natural-language goal for `planAndRun` |
+| `claim` | Report statement checked by `evidenceClaimCheck` |
+| `keyColumns` | Stable row-key columns for `tableWatchAndDiff` |
 | `waitPreset` | Named readiness preset: `genericPortalReady`, `defenderIncidentReady`, `azureBladeReady`, `entraTableReady` |
 | `contractName` | Named contract for `assertPageContract` |
 | `contractSelectors` | Selectors that must be visible |
@@ -216,6 +223,10 @@ New actions:
 | `mapForm` | Return field labels, names, types, required state, options, and selector hints | `selector`, `maxEntries` |
 | `watchPageChanges` | Observe mutation count, URL/title/text deltas, and new resource timings | `watchDurationMs` |
 | `highlightEvidence` | Create a screenshot with labeled boxes around important visible targets | `highlightSelectors`, `highlightText`, `selector` |
+| `planAndRun` | Turn a goal into a guarded sequence of readiness, contract, table, highlight, and explicit steps | `goal`, `steps` |
+| `evidenceClaimCheck` | Return supported/not-enough-evidence verdict with matching terms, snippets, and table rows | `claim`, `tableSelector` |
+| `tableWatchAndDiff` | Compare two table snapshots and report added, removed, and changed rows | `tableSelector`, `keyColumns`, `watchDurationMs` |
+| `browserRunBundle` | Create `_run-bundles/<id>/` with manifest, README, action logs, and capture references | `captureGroup` |
 | `waitPreset` | Run a named readiness wait and contract check | `waitPreset` |
 | `assertPageContract` | Check page selectors/texts or named portal contracts | `contractName`, `contractSelectors`, `contractTexts` |
 | `buildEvidencePack` | Assemble `_evidence-pack.md` and `_evidence-pack.json` in a capture group | `captureGroup` |
@@ -230,6 +241,8 @@ New actions:
 Prefer `accessibilitySnapshot` before uncertain clicks and `mapForm` before `smartFormFill`. Use `watchPageChanges` after manual sign-in, navigation, or portal blade changes when the page may still be settling. Use `highlightEvidence` for screenshots that need to show exactly which table, panel, or status marker supports the conclusion.
 
 Use `waitPreset` before portal-specific evidence collection, then `assertPageContract` before extracting tables or summarizing visible evidence. After collecting multiple captures, call `buildEvidencePack` and `buildNavigationGraph` so downstream analysis can correlate action flow, captures, and screenshots. Use `createHandoff` when automation reaches a point where the operator should continue manually.
+
+Use `planAndRun` when the user gives a goal rather than exact selectors, but keep `captureAfter: false` until the generated steps are known to be useful. Use `evidenceClaimCheck` before writing final report claims. Use `tableWatchAndDiff` for portal grids that refresh in place, and `browserRunBundle` at handoff time after captures and evidence packs exist.
 
 Semantic expressions for `semanticWait` or `wait.kind=semantic`:
 
