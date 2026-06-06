@@ -160,6 +160,30 @@ Supported `wait.kind` values:
 | `urlSettled` | URL stops changing |
 | `composite` | Spinner gone and optional selector visible |
 | `semantic` | All semantic expressions pass |
+| `networkIdle` | Resource activity is unchanged for `idleMs` |
+| `requestDone` | Matching resource entries are observed (`urlIncludes`) |
+
+`requestDone` currently uses `PerformanceResourceTiming` evidence. `statusIn` can be passed for forward compatibility but is not enforced in MV3 runtime.
+
+## New Targeting And Replay Features
+
+Use these inputs with `#browserAct` for higher reliability on modern web apps:
+
+| Input | Purpose |
+|---|---|
+| `targetScope` | Target lookup scope: `auto`, `main`, `allFrames`, `shadowDeep` |
+| `frameDepth` | Max same-origin iframe traversal depth |
+| `retryProfile` | Retry preset: `conservative`, `standard`, `aggressive` |
+| `captureBeforeAfter` | Adds lightweight before/after DOM diff metadata |
+| `macroName` | Macro identifier for `recordWorkflow` and `replayWorkflow` |
+| `params` | Template values for replay (`{{key}}`) |
+
+New actions:
+
+| Action | Purpose | Key inputs |
+|---|---|---|
+| `recordWorkflow` | Save reusable workflow steps in browser local storage | `macroName`, `steps` |
+| `replayWorkflow` | Replay a saved workflow with optional template parameters | `macroName`, `params`, `captureBeforeAfter` |
 
 Semantic expressions for `semanticWait` or `wait.kind=semantic`:
 

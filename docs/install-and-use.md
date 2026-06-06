@@ -311,7 +311,15 @@ Do not commit `raw/browser-captures/`, screenshots, or customer/security investi
 
 ## 10. Release Checklist
 
-Before creating a GitHub Release, run:
+Before creating a GitHub Release from your local machine, run:
+
+```powershell
+npm run release:local
+```
+
+`release:local` runs the full release checks and then installs the generated VSIX into local VS Code automatically.
+
+If you only want validation/package checks without local install, run:
 
 ```powershell
 npm run release:check

@@ -6,6 +6,16 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-06-06
+
+- Added deep target lookup across Shadow DOM and same-origin iframes with `targetScope` and `frameDepth`.
+- Added network wait conditions with `wait.kind=networkIdle` and `wait.kind=requestDone`.
+- Added interactable scoring for target inspection and interactable listing.
+- Added `retryProfile` and lightweight `captureBeforeAfter` diff metadata for resilient workflows.
+- Improved `smartFormFill` handling for date, telephone, checkbox, radio, select, and contenteditable fields.
+- Added `recordWorkflow` and `replayWorkflow` macro actions with parameter substitution.
+- Added `release:local` and `install:local-vsix` so releases install the built VSIX into local VS Code.
+
 ## [0.1.14] - 2026-06-06
 
 - Added `captureElement` to capture screenshot evidence clipped to a target element with optional padding.

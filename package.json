@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -177,7 +177,7 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "resumeAfterAuth", "runWorkflow"],
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "recordWorkflow", "replayWorkflow", "resumeAfterAuth", "runWorkflow"],
               "description": "Browser action to run. Defaults to readPage."
             },
             "selector": {
@@ -318,9 +318,36 @@
               "type": "boolean",
               "description": "When true, failed DOM target actions inspect ranked visual/accessibility candidates and retry likely targets."
             },
+            "targetScope": {
+              "type": "string",
+              "enum": ["auto", "main", "allFrames", "shadowDeep"],
+              "description": "Target lookup scope. auto traverses shadow roots and same-origin iframes when possible."
+            },
+            "frameDepth": {
+              "type": "number",
+              "description": "Maximum same-origin iframe traversal depth for target lookup."
+            },
+            "retryProfile": {
+              "type": "string",
+              "enum": ["conservative", "standard", "aggressive"],
+              "description": "Preset retry behavior profile when retries is omitted."
+            },
+            "captureBeforeAfter": {
+              "type": "boolean",
+              "description": "Capture lightweight before/after DOM diff metadata around the action run."
+            },
             "targetHint": {
               "type": "string",
               "description": "Natural-language target hint used by inspectTargets or auto-healing target selection."
+            },
+            "macroName": {
+              "type": "string",
+              "description": "Workflow macro name for recordWorkflow and replayWorkflow actions."
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "Template parameters for replayWorkflow; replaces {{key}} placeholders in stored macro steps."
             },
             "regionX": {
               "type": "number",
@@ -479,11 +506,21 @@
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": ["text", "element", "elementGone", "urlMatch", "spinnerGone", "elementStable", "urlSettled", "composite", "semantic"]
+                  "enum": ["text", "element", "elementGone", "urlMatch", "spinnerGone", "elementStable", "urlSettled", "composite", "semantic", "networkIdle", "requestDone"]
                 },
                 "text": { "type": "string" },
                 "selector": { "type": "string" },
                 "urlPattern": { "type": "string" },
+                "urlIncludes": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "statusIn": {
+                  "type": "array",
+                  "items": { "type": "number" }
+                },
+                "idleMs": { "type": "number" },
+                "maxInflight": { "type": "number" },
                 "semanticConditions": {
                   "type": "array",
                   "items": { "type": "string" }
@@ -561,8 +598,10 @@
     "package:vsix": "node scripts/package-vsix.mjs",
     "package:browser": "node scripts/package-browser-extension.mjs",
     "verify:release-assets": "node scripts/verify-release-assets.mjs",
+    "install:local-vsix": "node scripts/install-local-vsix.mjs",
     "package": "npm run package:vsix && npm run package:browser && npm run verify:release-assets",
     "release:check": "npm run compile && npm run lint && npm run package",
+    "release:local": "npm run release:check && npm run install:local-vsix",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test"

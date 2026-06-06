@@ -202,9 +202,24 @@ For paired browser control on allowed hosts:
 
 Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, text sample, and capture quality. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are also available: `wait`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `recordWorkflow`, `replayWorkflow`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` supports `preset`, `steps`, `retries`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `targetHint`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, capture element/region evidence, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, checkpoint rollback, manual review gates, and policy checks.
+`#browserAct` supports `preset`, `steps`, `retries`, `retryProfile`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `targetHint`, `targetScope`, `frameDepth`, `captureBeforeAfter`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `macroName`, `params`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, capture element/region evidence, form automation, conditional branching, runtime snapshots, gap detection, replay export, network traces, table extraction, checkpoint rollback, manual review gates, policy checks, and reusable macro playback.
+
+`wait.kind` additionally supports `networkIdle` and `requestDone` so workflows can wait for API/resource completion patterns.
+
+Example: deep targeting across Shadow DOM and same-origin iframes
+
+```text
+#browserAct { "action": "click", "targetHint": "Evidence", "targetScope": "allFrames", "frameDepth": 3, "retryProfile": "aggressive", "captureAfter": true, "investigationName": "incident-12345" } iframe 안쪽 후보까지 탐색해서 Evidence 탭을 열어줘.
+```
+
+Example: record and replay a macro workflow
+
+```text
+#browserAct { "action": "recordWorkflow", "macroName": "incident-open", "steps": [{ "action": "click", "text": "Incidents" }, { "action": "click", "text": "Open" }] }
+#browserAct { "action": "replayWorkflow", "macroName": "incident-open", "captureBeforeAfter": true, "captureAfter": true, "investigationName": "incident-12345" }
+```
 
 Example: capture only a target panel
 
@@ -270,7 +285,15 @@ For the full pairing walkthrough, see [Pairing Setup](#pairing-setup).
 
 ## Release Process
 
-Run this before creating every GitHub Release:
+Use this local release command before creating every GitHub Release:
+
+```powershell
+npm run release:local
+```
+
+`npm run release:local` runs `release:check` and then installs the built VSIX into your local VS Code automatically.
+
+If you only need CI-style validation without local install, run:
 
 ```powershell
 npm run release:check

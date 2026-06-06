@@ -71,12 +71,16 @@ type CaptureGroupSummary = {
 };
 
 type BrowserWaitCondition = {
-	kind?: 'text' | 'element' | 'elementGone' | 'urlMatch' | 'spinnerGone' | 'elementStable' | 'urlSettled' | 'composite' | 'semantic';
+	kind?: 'text' | 'element' | 'elementGone' | 'urlMatch' | 'spinnerGone' | 'elementStable' | 'urlSettled' | 'composite' | 'semantic' | 'networkIdle' | 'requestDone';
 	text?: string;
 	selector?: string;
 	urlPattern?: string;
 	semanticConditions?: string[];
 	pollIntervalMs?: number;
+	urlIncludes?: string[];
+	statusIn?: number[];
+	idleMs?: number;
+	maxInflight?: number;
 };
 
 type BrowserStepInput = {
@@ -147,6 +151,13 @@ type BrowserStepInput = {
 	ignoreSelectors?: string[];
 	policyProfile?: string;
 	onViolation?: 'block' | 'warn';
+	targetScope?: 'auto' | 'main' | 'allFrames' | 'shadowDeep';
+	frameDepth?: number;
+	retryProfile?: 'conservative' | 'standard' | 'aggressive';
+	captureBeforeAfter?: boolean;
+	macroName?: string;
+	params?: Record<string, string>;
+	steps?: BrowserStepInput[];
 };
 
 type BrowserPreset = 'defenderIncidentSurvey' | 'defenderIncidentAlerts' | 'defenderIncidentEvidence';
@@ -194,6 +205,8 @@ type BrowserAction =
 	| 'semanticWait'
 	| 'compareCaptureRuns'
 	| 'policyGuard'
+	| 'recordWorkflow'
+	| 'replayWorkflow'
 	| 'resumeAfterAuth'
 	| 'runWorkflow';
 
@@ -270,6 +283,12 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	ignoreSelectors: string[];
 	policyProfile?: string;
 	onViolation: 'block' | 'warn';
+	targetScope?: 'auto' | 'main' | 'allFrames' | 'shadowDeep';
+	frameDepth?: number;
+	retryProfile: 'conservative' | 'standard' | 'aggressive';
+	captureBeforeAfter: boolean;
+	macroName?: string;
+	params?: Record<string, string>;
 	investigationName?: string;
 	allowedHosts: string[];
 };
@@ -623,7 +642,7 @@ const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
 	'listInteractables', 'inspectTargets', 'captureElement', 'captureRegion', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
 	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
 	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
-	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard',
+	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'recordWorkflow', 'replayWorkflow',
 	'resumeAfterAuth', 'runWorkflow'
 ];
 
@@ -632,7 +651,8 @@ const DESTRUCTIVE_BROWSER_ACTIONS: BrowserAction[] = ['closeTab'];
 function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 	const action = (input.action ?? 'readPage') as BrowserAction;
 	const timeoutMs = clampTimeout(input.timeoutMs);
-	const retries = clampRetries(input.retries);
+	const retryProfile = clampRetryProfile(input.retryProfile);
+	const retries = resolveRetries(input.retries, retryProfile);
 	const allowedHosts = getConfig().get<string[]>('allowedHosts', []);
 	const presetSteps = expandPreset(input.preset);
 	const workflowSteps = normalizeSteps(input.steps);
@@ -712,10 +732,13 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		onViolation: input.onViolation === 'warn' ? 'warn' : 'block',
 		wait: input.wait,
 		retries,
+		retryProfile,
 		fallbackSelectors: sanitizeStringList(input.fallbackSelectors),
 		fallbackTexts: sanitizeStringList(input.fallbackTexts),
 		autoHeal: Boolean(input.autoHeal || input.targetHint),
 		targetHint: input.targetHint,
+		targetScope: clampTargetScope(input.targetScope),
+		frameDepth: clampFrameDepth(input.frameDepth),
 		regionX: clampRegionCoordinate(input.regionX),
 		regionY: clampRegionCoordinate(input.regionY),
 		regionWidth: clampRegionSize(input.regionWidth),
@@ -729,6 +752,9 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		captureAfter: input.captureAfter ?? (action !== 'listInteractables' && action !== 'inspectTargets'),
 		includeScreenshot: input.includeScreenshot ?? true,
 		includeHtml: input.includeHtml ?? false,
+		captureBeforeAfter: Boolean(input.captureBeforeAfter),
+		macroName: sanitizeMacroName(input.macroName),
+		params: sanitizeSelectorMap(input.params),
 		investigationName: input.investigationName,
 		allowedHosts
 	};
@@ -853,12 +879,24 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 		throw new Error('browserAct wait requires wait.kind.');
 	}
 
+	if (action === 'wait' && step.wait?.kind === 'requestDone' && (!Array.isArray(step.wait.urlIncludes) || step.wait.urlIncludes.length === 0)) {
+		throw new Error('browserAct wait requestDone requires wait.urlIncludes.');
+	}
+
 	if (action === 'runWorkflow' && !topLevel) {
 		throw new Error('runWorkflow can only be used as the top-level action.');
 	}
 
 	if (action === 'resumeAfterAuth') {
 		throw new Error('resumeAfterAuth can only be used as a top-level action.');
+	}
+
+	if (action === 'recordWorkflow' && (!step.macroName || (!Array.isArray(step.steps) || step.steps.length === 0))) {
+		throw new Error('browserAct recordWorkflow requires macroName and steps.');
+	}
+
+	if (action === 'replayWorkflow' && !step.macroName) {
+		throw new Error('browserAct replayWorkflow requires macroName.');
 	}
 
 	if (action === 'journeyCapture') {
@@ -917,6 +955,10 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 
 	if (action === 'policyGuard' && !step.policyProfile) {
 		throw new Error('browserAct policyGuard requires policyProfile.');
+	}
+
+	if (step.targetScope && !['auto', 'main', 'allFrames', 'shadowDeep'].includes(step.targetScope)) {
+		throw new Error('browserAct targetScope must be one of auto, main, allFrames, shadowDeep.');
 	}
 
 	const highRiskActions: BrowserAction[] = ['navigate', 'openInNewTab', 'closeTab', 'journeyCapture', 'paginateCapture', 'multiTabCrawl'];
@@ -1016,6 +1058,54 @@ function clampRetries(retries: number | undefined) {
 	}
 
 	return Math.min(Math.max(Math.trunc(retries), 0), 3);
+}
+
+function clampRetryProfile(profile: BrowserStepInput['retryProfile']): 'conservative' | 'standard' | 'aggressive' {
+	if (profile === 'conservative' || profile === 'aggressive') {
+		return profile;
+	}
+
+	return 'standard';
+}
+
+function resolveRetries(retries: number | undefined, profile: 'conservative' | 'standard' | 'aggressive') {
+	if (typeof retries === 'number' && Number.isFinite(retries)) {
+		return clampRetries(retries);
+	}
+
+	if (profile === 'conservative') {
+		return 0;
+	}
+ if (profile === 'aggressive') {
+		return 3;
+	}
+
+	return 1;
+}
+
+function clampTargetScope(scope: BrowserStepInput['targetScope']) {
+	if (scope === 'main' || scope === 'allFrames' || scope === 'shadowDeep') {
+		return scope;
+	}
+
+	return 'auto';
+}
+
+function clampFrameDepth(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return 2;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), 0), 6);
+}
+
+function sanitizeMacroName(name: string | undefined) {
+	if (typeof name !== 'string') {
+		return undefined;
+	}
+
+	const sanitized = name.trim().slice(0, 64);
+	return sanitized.length > 0 ? sanitized : undefined;
 }
 
 function clampMaxPages(maxPages: number | undefined) {

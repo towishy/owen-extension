@@ -13,6 +13,7 @@ const stateCheckpoints = new Map();
 const executionRunHistory = new Map();
 const BROWSER_SESSION_STORAGE_KEY = 'owenBrowserSessionId';
 const LATEST_BROWSER_STATE_STORAGE_KEY = 'owenLatestBrowserState';
+const WORKFLOW_MACROS_STORAGE_KEY = 'owenWorkflowMacros';
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('owen-command-poll', { periodInMinutes: 0.5 });
@@ -76,10 +77,31 @@ async function executeBrowserCommand(command, options) {
   try {
     const workflow = command.action === 'runWorkflow' ? normalizeWorkflowSteps(command.steps) : [command];
     const executionTrail = [];
+    let beforeAfterDiff;
 
-    for (const step of workflow) {
-      const result = await executeSingleAction(step, command.allowedHosts);
-      executionTrail.push({ action: step.action, result });
+    if (command.captureBeforeAfter) {
+      const activeTab = await getActiveTab();
+      const before = await collectDomFingerprint(activeTab.id);
+      const beforeUrl = activeTab.url;
+      for (const step of workflow) {
+        const result = await executeSingleAction(step, command.allowedHosts);
+        executionTrail.push({ action: step.action, result });
+      }
+      const afterTab = await getActiveTab();
+      const after = await collectDomFingerprint(afterTab.id);
+      beforeAfterDiff = {
+        beforeHash: before.hash,
+        afterHash: after.hash,
+        changed: before.hash !== after.hash || beforeUrl !== afterTab.url,
+        urlChanged: beforeUrl !== afterTab.url,
+        textDelta: after.textLength - before.textLength,
+        headingDelta: after.headings - before.headings
+      };
+    } else {
+      for (const step of workflow) {
+        const result = await executeSingleAction(step, command.allowedHosts);
+        executionTrail.push({ action: step.action, result });
+      }
     }
 
     const currentTab = await getActiveTab();
@@ -96,6 +118,7 @@ async function executeBrowserCommand(command, options) {
         runId: command.id,
         action: command.action,
         steps: executionTrail,
+        beforeAfterDiff,
         url: currentTab.url,
         title: currentTab.title,
         tabIndex: currentTab.index,
@@ -240,6 +263,14 @@ async function executeSingleAction(command, allowedHosts) {
     return runPolicyGuard(command, allowedHosts);
   }
 
+  if (action === 'recordWorkflow') {
+    return runRecordWorkflow(command);
+  }
+
+  if (action === 'replayWorkflow') {
+    return runReplayWorkflow(command, allowedHosts);
+  }
+
   if (action === 'navigate') {
     assertAllowedUrl(command.url, allowedHosts);
     const tab = await getActiveTab();
@@ -336,10 +367,16 @@ async function executeSingleAction(command, allowedHosts) {
   }
 
   const targets = buildTargetCandidates(command);
-  const maxRetries = Number.isInteger(command.retries) ? command.retries : 0;
+  const retryProfile = String(command.retryProfile || 'standard');
+  const profileRetries = retryProfile === 'conservative' ? 0 : retryProfile === 'aggressive' ? 3 : 1;
+  const maxRetries = Number.isInteger(command.retries) ? command.retries : profileRetries;
   let lastError = 'Action failed.';
 
   for (let retry = 0; retry <= maxRetries; retry += 1) {
+    if (retry > 0) {
+      const backoffMs = retryProfile === 'aggressive' ? retry * 300 : retryProfile === 'conservative' ? retry * 900 : retry * 600;
+      await sleep(backoffMs);
+    }
     for (const candidate of targets) {
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -391,7 +428,7 @@ async function executeSingleAction(command, allowedHosts) {
 }
 
 function ensureOperatorConfirmed(command, action) {
-  const highRisk = new Set(['navigate', 'openInNewTab', 'closeTab', 'journeyCapture', 'paginateCapture', 'multiTabCrawl']);
+  const highRisk = new Set(['navigate', 'openInNewTab', 'closeTab', 'journeyCapture', 'paginateCapture', 'multiTabCrawl', 'bulkActionFromList', 'safeDownloadAndHash', 'replayWorkflow']);
   if (!highRisk.has(action)) {
     return;
   }
@@ -666,7 +703,9 @@ async function runCaptureElement(command, allowedHosts) {
       role: command.role,
       index: command.index,
       targetHint: command.targetHint,
-      regionPadding: command.regionPadding
+      regionPadding: command.regionPadding,
+      targetScope: command.targetScope,
+      frameDepth: command.frameDepth
     }]
   });
 
@@ -1030,6 +1069,79 @@ async function runPolicyGuard(command, allowedHosts) {
   };
 }
 
+async function runRecordWorkflow(command) {
+  const macroName = String(command.macroName || '').trim();
+  if (!macroName) {
+    throw new Error('recordWorkflow requires macroName.');
+  }
+
+  const steps = Array.isArray(command.steps) ? command.steps.slice(0, 50) : [];
+  if (steps.length === 0) {
+    throw new Error('recordWorkflow requires at least one step.');
+  }
+
+  const stored = await chrome.storage.local.get(WORKFLOW_MACROS_STORAGE_KEY);
+  const macros = stored[WORKFLOW_MACROS_STORAGE_KEY] && typeof stored[WORKFLOW_MACROS_STORAGE_KEY] === 'object'
+    ? stored[WORKFLOW_MACROS_STORAGE_KEY]
+    : {};
+
+  macros[macroName] = {
+    macroName,
+    updatedAt: new Date().toISOString(),
+    steps
+  };
+
+  await chrome.storage.local.set({ [WORKFLOW_MACROS_STORAGE_KEY]: macros });
+  return { ok: true, macroName, stepCount: steps.length };
+}
+
+async function runReplayWorkflow(command, allowedHosts) {
+  const macroName = String(command.macroName || '').trim();
+  if (!macroName) {
+    throw new Error('replayWorkflow requires macroName.');
+  }
+
+  const stored = await chrome.storage.local.get(WORKFLOW_MACROS_STORAGE_KEY);
+  const macros = stored[WORKFLOW_MACROS_STORAGE_KEY] && typeof stored[WORKFLOW_MACROS_STORAGE_KEY] === 'object'
+    ? stored[WORKFLOW_MACROS_STORAGE_KEY]
+    : {};
+  const macro = macros[macroName];
+  if (!macro || !Array.isArray(macro.steps) || macro.steps.length === 0) {
+    throw new Error(`Workflow macro not found: ${macroName}`);
+  }
+
+  const params = command.params && typeof command.params === 'object' ? command.params : {};
+  const renderedSteps = macro.steps.map(step => renderTemplateObject(step, params));
+  const results = [];
+  for (const step of renderedSteps) {
+    const result = await executeSingleAction({ ...command, ...step, action: step.action ?? 'readPage' }, allowedHosts);
+    results.push({ action: step.action ?? 'readPage', result });
+  }
+
+  return { ok: true, macroName, executed: results.length, steps: results };
+}
+
+function renderTemplateObject(input, params) {
+  if (typeof input === 'string') {
+    return input.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (match, key) => {
+      const value = params[key];
+      return typeof value === 'string' ? value : match;
+    });
+  }
+  if (Array.isArray(input)) {
+    return input.map(item => renderTemplateObject(item, params));
+  }
+  if (!input || typeof input !== 'object') {
+    return input;
+  }
+
+  const output = {};
+  for (const [key, value] of Object.entries(input)) {
+    output[key] = renderTemplateObject(value, params);
+  }
+  return output;
+}
+
 async function evaluateConditionOnTab(tabId, condition) {
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
@@ -1256,7 +1368,15 @@ async function detectAuthRequired(tabId) {
 }
 
 function buildTargetCandidates(command) {
-  const candidates = [{ selector: command.selector, text: command.text, label: command.label, role: command.role, index: command.index }];
+  const candidates = [{
+    selector: command.selector,
+    text: command.text,
+    label: command.label,
+    role: command.role,
+    index: command.index,
+    targetScope: command.targetScope,
+    frameDepth: command.frameDepth
+  }];
   for (const selector of command.fallbackSelectors ?? []) {
     candidates.push({ ...candidates[0], selector });
   }
@@ -1274,6 +1394,8 @@ function buildTargetIntent(command) {
     label: command.label,
     role: command.role,
     targetHint: command.targetHint,
+    targetScope: command.targetScope,
+    frameDepth: command.frameDepth,
     action: command.action
   };
 }
@@ -1484,6 +1606,94 @@ async function createCapturePayload(tab, command, options, screenshotOverride) {
 function runDomCommand(command) {
   try {
     const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+    const scope = String(command.targetScope || 'auto');
+    const includeFrames = scope === 'allFrames' || scope === 'auto';
+    const includeShadow = scope === 'shadowDeep' || scope === 'auto';
+    const maxFrameDepth = Math.min(Math.max(Number(command.frameDepth) || 2, 0), 6);
+
+    const normalizeDateInput = value => {
+      const raw = String(value ?? '').trim();
+      const matched = raw.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/);
+      if (matched) {
+        const year = matched[1];
+        const month = matched[2].padStart(2, '0');
+        const day = matched[3].padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      return raw;
+    };
+
+    const normalizePhone = value => String(value ?? '').replace(/[^0-9+]/g, '');
+
+    const toBoolean = value => {
+      const lowered = normalize(value).toLowerCase();
+      return lowered === 'true' || lowered === 'yes' || lowered === 'on' || lowered === '1' || lowered === 'checked';
+    };
+
+    const enumerateRoots = () => {
+      const contexts = [{ root: document, framePath: 'main' }];
+      const queue = [{ doc: document, framePath: 'main', depth: 0 }];
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) {
+          continue;
+        }
+
+        const elements = Array.from(current.doc.querySelectorAll('*'));
+        for (const element of elements) {
+          if (includeShadow && element.shadowRoot) {
+            contexts.push({ root: element.shadowRoot, framePath: current.framePath });
+          }
+        }
+
+        if (!includeFrames || current.depth >= maxFrameDepth) {
+          continue;
+        }
+
+        const frames = Array.from(current.doc.querySelectorAll('iframe'));
+        for (let i = 0; i < frames.length; i += 1) {
+          const frame = frames[i];
+          try {
+            const frameDoc = frame.contentDocument;
+            if (!frameDoc) {
+              continue;
+            }
+            const framePath = `${current.framePath}>iframe[${i}]`;
+            contexts.push({ root: frameDoc, framePath });
+            queue.push({ doc: frameDoc, framePath, depth: current.depth + 1 });
+          } catch {
+            // Ignore cross-origin iframes.
+          }
+        }
+      }
+
+      return contexts;
+    };
+
+    const queryAll = selector => {
+      if (!selector) {
+        return [];
+      }
+      const roots = enumerateRoots();
+      const found = [];
+      for (const context of roots) {
+        try {
+          const nodes = Array.from(context.root.querySelectorAll(selector));
+          for (const node of nodes) {
+            found.push({ element: node, framePath: context.framePath });
+          }
+        } catch {
+          // Invalid selector for this root.
+        }
+      }
+      return found;
+    };
+
+    const queryFirst = selector => {
+      const matches = queryAll(selector);
+      return matches.length > 0 ? matches[0] : undefined;
+    };
 
     const isVisible = element => {
       if (!element) {
@@ -1497,18 +1707,51 @@ function runDomCommand(command) {
       return rect.width > 0 && rect.height > 0;
     };
 
+    const isInViewport = element => {
+      if (!element) {
+        return false;
+      }
+      const rect = element.getBoundingClientRect();
+      return rect.bottom >= 0 && rect.right >= 0 && rect.top <= window.innerHeight && rect.left <= window.innerWidth;
+    };
+
+    const isOverlapped = element => {
+      if (!element || !isVisible(element)) {
+        return true;
+      }
+      const rect = element.getBoundingClientRect();
+      const cx = Math.round(rect.left + rect.width / 2);
+      const cy = Math.round(rect.top + rect.height / 2);
+      const clampedX = Math.max(0, Math.min(cx, window.innerWidth - 1));
+      const clampedY = Math.max(0, Math.min(cy, window.innerHeight - 1));
+      const topElement = document.elementFromPoint(clampedX, clampedY);
+      if (!topElement) {
+        return true;
+      }
+      return topElement !== element && !element.contains(topElement);
+    };
+
+    const isDisabled = element => Boolean(element?.disabled || element?.getAttribute?.('aria-disabled') === 'true');
+
+    const getSearchableElements = query => {
+      if (!query) {
+        return [];
+      }
+      return queryAll(query).filter(item => isVisible(item.element));
+    };
+
     const findByIntent = () => {
       if (command.selector) {
-        return document.querySelector(command.selector);
+        return queryFirst(command.selector);
       }
 
       const query = command.role
         ? `[role="${command.role}"]`
         : 'button,[role="button"],[role="tab"],a,input,textarea,select,[tabindex]';
-      const elements = Array.from(document.querySelectorAll(query));
+      const elements = getSearchableElements(query);
       const byLabel = normalize(command.label).toLowerCase();
       if (byLabel) {
-        const matched = elements.filter(element => normalize(element.getAttribute('aria-label') || element.getAttribute('title') || '').toLowerCase().includes(byLabel));
+        const matched = elements.filter(item => normalize(item.element.getAttribute('aria-label') || item.element.getAttribute('title') || '').toLowerCase().includes(byLabel));
         if (matched.length > 0) {
           return matched[Math.max(0, Math.min(command.index ?? 0, matched.length - 1))];
         }
@@ -1519,7 +1762,7 @@ function runDomCommand(command) {
         return undefined;
       }
 
-      const matched = elements.filter(element => normalize(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || '').toLowerCase().includes(byText));
+      const matched = elements.filter(item => normalize(item.element.innerText || item.element.value || item.element.getAttribute('aria-label') || item.element.getAttribute('title') || '').toLowerCase().includes(byText));
       if (matched.length === 0) {
         return undefined;
       }
@@ -1536,6 +1779,15 @@ function runDomCommand(command) {
       let lastStableText = '';
       let urlStableCount = 0;
       let lastUrl = location.href;
+      let lastResourceCount = -1;
+      let idleSince = Date.now();
+
+      const filteredResourceEntries = () => {
+        const filters = Array.isArray(condition?.urlIncludes) ? condition.urlIncludes.map(value => String(value).toLowerCase()).filter(Boolean) : [];
+        return performance.getEntriesByType('resource')
+          .map(entry => ({ name: String(entry.name || '').toLowerCase() }))
+          .filter(entry => filters.length === 0 || filters.some(filter => entry.name.includes(filter)));
+      };
 
       const check = () => {
         if (kind === 'urlMatch') {
@@ -1563,14 +1815,14 @@ function runDomCommand(command) {
             return;
           }
         } else if (kind === 'element') {
-          const element = document.querySelector(condition?.selector ?? command.selector ?? '');
-          if (isVisible(element)) {
+          const found = queryFirst(condition?.selector ?? command.selector ?? '');
+          if (isVisible(found?.element)) {
             resolve({ ok: true });
             return;
           }
         } else if (kind === 'elementGone') {
-          const element = document.querySelector(condition?.selector ?? command.selector ?? '');
-          if (!isVisible(element)) {
+          const found = queryFirst(condition?.selector ?? command.selector ?? '');
+          if (!isVisible(found?.element)) {
             resolve({ ok: true });
             return;
           }
@@ -1582,8 +1834,8 @@ function runDomCommand(command) {
           }
         } else if (kind === 'elementStable') {
           const selector = condition?.selector ?? command.selector ?? '';
-          const element = selector ? document.querySelector(selector) : undefined;
-          const text = normalize(element?.innerText || element?.textContent || '');
+          const found = selector ? queryFirst(selector) : undefined;
+          const text = normalize(found?.element?.innerText || found?.element?.textContent || '');
           if (text && text === lastStableText) {
             stableCount += 1;
           } else {
@@ -1609,9 +1861,34 @@ function runDomCommand(command) {
         } else if (kind === 'composite') {
           const spinner = Array.from(document.querySelectorAll(spinnerSelector)).find(isVisible);
           const selector = condition?.selector ?? command.selector ?? '';
-          const element = selector ? document.querySelector(selector) : undefined;
-          if (!spinner && (!selector || isVisible(element))) {
+          const found = selector ? queryFirst(selector) : undefined;
+          if (!spinner && (!selector || isVisible(found?.element))) {
             resolve({ ok: true });
+            return;
+          }
+        } else if (kind === 'networkIdle') {
+          const entries = filteredResourceEntries();
+          const currentCount = entries.length;
+          if (currentCount !== lastResourceCount) {
+            lastResourceCount = currentCount;
+            idleSince = Date.now();
+          }
+          const idleMs = Math.min(Math.max(Number(condition?.idleMs) || 1200, 200), 10000);
+          if (Date.now() - idleSince >= idleMs) {
+            resolve({ ok: true, observedEntries: currentCount, idleMs });
+            return;
+          }
+        } else if (kind === 'requestDone') {
+          const entries = filteredResourceEntries();
+          if (entries.length > 0) {
+            resolve({
+              ok: true,
+              observedEntries: entries.length,
+              statusFilterApplied: Array.isArray(condition?.statusIn) && condition.statusIn.length > 0 ? false : undefined,
+              note: Array.isArray(condition?.statusIn) && condition.statusIn.length > 0
+                ? 'statusIn filter is not available from PerformanceResourceTiming and was ignored.'
+                : undefined
+            });
             return;
           }
         } else if (kind === 'semantic') {
@@ -1630,11 +1907,13 @@ function runDomCommand(command) {
             }
             if (value.startsWith('selector:')) {
               const selector = value.slice(9).trim();
-              return selector ? isVisible(document.querySelector(selector)) : false;
+              const found = selector ? queryFirst(selector) : undefined;
+              return selector ? isVisible(found?.element) : false;
             }
             if (value.startsWith('selectorGone:')) {
               const selector = value.slice(13).trim();
-              return selector ? !isVisible(document.querySelector(selector)) : false;
+              const found = selector ? queryFirst(selector) : undefined;
+              return selector ? !isVisible(found?.element) : false;
             }
             return pageText.includes(normalize(value).toLowerCase());
           });
@@ -1657,18 +1936,37 @@ function runDomCommand(command) {
     });
 
     const listInteractables = () => {
-      const elements = Array.from(document.querySelectorAll('button,[role="button"],[role="tab"],a,input,textarea,select,[tabindex]'))
-        .filter(isVisible)
+      const elements = getSearchableElements('button,[role="button"],[role="tab"],a,input,textarea,select,[tabindex]')
         .slice(0, 300)
-        .map((element, index) => ({
+        .map((item, index) => {
+          const element = item.element;
+          const overlapped = isOverlapped(element);
+          const inViewport = isInViewport(element);
+          const enabled = !isDisabled(element);
+          const interactableScore = {
+            visible: isVisible(element),
+            enabled,
+            notOverlapped: !overlapped,
+            inViewport
+          };
+          const score = (interactableScore.visible ? 35 : 0)
+            + (interactableScore.enabled ? 25 : 0)
+            + (interactableScore.notOverlapped ? 25 : 0)
+            + (interactableScore.inViewport ? 15 : 0);
+          return {
           index,
           tag: element.tagName.toLowerCase(),
           role: element.getAttribute('role') || undefined,
           id: element.id || undefined,
           classes: element.className || undefined,
           text: normalize(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || ''),
-          selectorHint: element.id ? `#${element.id}` : undefined
-        }));
+          selectorHint: element.id ? `#${element.id}` : undefined,
+          framePath: item.framePath,
+          interactableScore,
+          score
+          };
+        })
+        .sort((a, b) => b.score - a.score);
       return { ok: true, interactables: elements };
     };
 
@@ -1716,11 +2014,13 @@ function runDomCommand(command) {
       const updates = [];
       for (const [fieldName, fieldValue] of Object.entries(fields)) {
         const key = normalize(fieldName).toLowerCase();
-        const candidates = Array.from(document.querySelectorAll('input,textarea,select'));
-        const target = candidates.find(element => {
+        const candidates = getSearchableElements('input,textarea,select,[contenteditable="true"],[role="textbox"]');
+        const found = candidates.find(item => {
+          const element = item.element;
           const label = normalize(element.getAttribute('aria-label') || element.getAttribute('name') || element.getAttribute('placeholder') || '').toLowerCase();
           return Boolean(label) && label.includes(key);
         });
+        const target = found?.element;
         if (!target) {
           updates.push({ field: fieldName, updated: false });
           continue;
@@ -1733,6 +2033,14 @@ function runDomCommand(command) {
           if (option) {
             select.value = option.value;
           }
+        } else if (target.isContentEditable || target.getAttribute('contenteditable') === 'true') {
+          target.textContent = String(fieldValue);
+        } else if (target.type === 'checkbox' || target.type === 'radio') {
+          target.checked = toBoolean(fieldValue);
+        } else if (target.type === 'date') {
+          target.value = normalizeDateInput(fieldValue);
+        } else if (target.type === 'tel') {
+          target.value = normalizePhone(fieldValue);
         } else {
           target.value = String(fieldValue);
         }
@@ -1743,8 +2051,8 @@ function runDomCommand(command) {
 
       if (command.submitSelector || command.submitText) {
         const submit = command.submitSelector
-          ? document.querySelector(command.submitSelector)
-          : Array.from(document.querySelectorAll('button,input[type="submit"],a,[role="button"]')).find(node => normalize(node.innerText || node.value || node.getAttribute('aria-label') || '').toLowerCase().includes(normalize(command.submitText).toLowerCase()));
+          ? queryFirst(command.submitSelector)?.element
+          : getSearchableElements('button,input[type="submit"],a,[role="button"]').map(item => item.element).find(node => normalize(node.innerText || node.value || node.getAttribute('aria-label') || '').toLowerCase().includes(normalize(command.submitText).toLowerCase()));
         if (submit) {
           submit.click();
         }
@@ -1753,21 +2061,22 @@ function runDomCommand(command) {
       return { ok: true, updates };
     }
 
-    const element = findByIntent();
-    if (!element) {
+    const resolved = findByIntent();
+    const element = resolved?.element;
+    if (!resolved || !element) {
       return { error: command.selector ? `Element not found: ${command.selector}` : `Element text not found: ${command.text}` };
     }
 
     element.scrollIntoView({ block: 'center', inline: 'center' });
     if (command.action === 'click') {
       element.click();
-      return { ok: true };
+      return { ok: true, framePath: resolved.framePath };
     }
 
     if (command.action === 'hover') {
       element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
       element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-      return { ok: true };
+      return { ok: true, framePath: resolved.framePath };
     }
 
     if (command.action === 'clearInput') {
@@ -1776,7 +2085,7 @@ function runDomCommand(command) {
       input.value = '';
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
-      return { ok: true };
+      return { ok: true, framePath: resolved.framePath };
     }
 
     if (command.action === 'selectOption') {
@@ -1794,7 +2103,7 @@ function runDomCommand(command) {
       select.value = option.value;
       select.dispatchEvent(new Event('input', { bubbles: true }));
       select.dispatchEvent(new Event('change', { bubbles: true }));
-      return { ok: true, value: option.value };
+      return { ok: true, value: option.value, framePath: resolved.framePath };
     }
 
     if (command.action === 'type') {
@@ -1807,7 +2116,7 @@ function runDomCommand(command) {
       input.value = command.value;
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
-      return { ok: true };
+      return { ok: true, framePath: resolved.framePath };
     }
 
     return { error: `Unsupported DOM action: ${command.action}` };
@@ -2081,6 +2390,10 @@ function collectPageSnapshot(includeHtml) {
 function inspectTargetsOnPage(intent) {
   const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
   const normalizeLower = value => normalize(value).toLowerCase();
+  const scope = String(intent?.targetScope || 'auto');
+  const includeFrames = scope === 'allFrames' || scope === 'auto';
+  const includeShadow = scope === 'shadowDeep' || scope === 'auto';
+  const maxFrameDepth = Math.min(Math.max(Number(intent?.frameDepth) || 2, 0), 6);
   const isVisible = element => {
     if (!element) {
       return false;
@@ -2091,6 +2404,60 @@ function inspectTargetsOnPage(intent) {
     }
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
+  };
+  const isInViewport = element => {
+    const rect = element.getBoundingClientRect();
+    return rect.bottom >= 0 && rect.right >= 0 && rect.top <= window.innerHeight && rect.left <= window.innerWidth;
+  };
+  const isDisabled = element => Boolean(element?.disabled || element?.getAttribute?.('aria-disabled') === 'true');
+  const isOverlapped = element => {
+    const rect = element.getBoundingClientRect();
+    const cx = Math.max(0, Math.min(Math.round(rect.left + rect.width / 2), window.innerWidth - 1));
+    const cy = Math.max(0, Math.min(Math.round(rect.top + rect.height / 2), window.innerHeight - 1));
+    const topElement = document.elementFromPoint(cx, cy);
+    if (!topElement) {
+      return true;
+    }
+    return topElement !== element && !element.contains(topElement);
+  };
+  const enumerateRoots = () => {
+    const contexts = [{ root: document, framePath: 'main' }];
+    const queue = [{ doc: document, framePath: 'main', depth: 0 }];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) {
+        continue;
+      }
+
+      const allNodes = Array.from(current.doc.querySelectorAll('*'));
+      if (includeShadow) {
+        for (const node of allNodes) {
+          if (node.shadowRoot) {
+            contexts.push({ root: node.shadowRoot, framePath: current.framePath });
+          }
+        }
+      }
+
+      if (!includeFrames || current.depth >= maxFrameDepth) {
+        continue;
+      }
+
+      const frames = Array.from(current.doc.querySelectorAll('iframe'));
+      for (let i = 0; i < frames.length; i += 1) {
+        try {
+          const frameDoc = frames[i].contentDocument;
+          if (!frameDoc) {
+            continue;
+          }
+          const framePath = `${current.framePath}>iframe[${i}]`;
+          contexts.push({ root: frameDoc, framePath });
+          queue.push({ doc: frameDoc, framePath, depth: current.depth + 1 });
+        } catch {
+          // Ignore cross-origin frames.
+        }
+      }
+    }
+    return contexts;
   };
   const selectorHint = element => {
     if (element.id) {
@@ -2120,8 +2487,18 @@ function inspectTargetsOnPage(intent) {
   );
   const needle = normalizeLower(intent?.targetHint || intent?.label || intent?.text || intent?.selector || '');
   const wantedRole = normalizeLower(intent?.role || '');
-  const nodes = Array.from(document.querySelectorAll('button,[role="button"],[role="tab"],a[href],input,textarea,select,[tabindex]')).filter(isVisible);
-  const rankedTargets = nodes.map((element, index) => {
+  const contexts = enumerateRoots();
+  const nodes = [];
+  for (const context of contexts) {
+    const found = Array.from(context.root.querySelectorAll('button,[role="button"],[role="tab"],a[href],input,textarea,select,[tabindex]'));
+    for (const element of found) {
+      if (isVisible(element)) {
+        nodes.push({ element, framePath: context.framePath });
+      }
+    }
+  }
+  const rankedTargets = nodes.map((item, index) => {
+    const element = item.element;
     const rect = element.getBoundingClientRect();
     const role = element.getAttribute('role') || (element.tagName.toLowerCase() === 'button' ? 'button' : undefined);
     const text = normalize(element.innerText || element.value || '');
@@ -2145,9 +2522,19 @@ function inspectTargetsOnPage(intent) {
       score += 8;
       reasons.push('usable-bounds');
     }
-    if (element.disabled || element.getAttribute('aria-disabled') === 'true') {
+    if (isDisabled(element)) {
       score -= 40;
       reasons.push('disabled');
+    }
+    const overlapped = isOverlapped(element);
+    const inViewport = isInViewport(element);
+    if (overlapped) {
+      score -= 20;
+      reasons.push('overlapped');
+    }
+    if (!inViewport) {
+      score -= 8;
+      reasons.push('off-viewport');
     }
 
     return {
@@ -2160,7 +2547,14 @@ function inspectTargetsOnPage(intent) {
       text: text.slice(0, 180),
       accessibleName: accessibleName.slice(0, 180),
       selectorHint: selectorHint(element),
-      disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+      disabled: isDisabled(element),
+      framePath: item.framePath,
+      interactableScore: {
+        visible: true,
+        enabled: !isDisabled(element),
+        notOverlapped: !overlapped,
+        inViewport
+      },
       bounds: {
         x: Math.round(rect.x),
         y: Math.round(rect.y),
@@ -2248,6 +2642,10 @@ function arrayBufferToBase64(buffer) {
 function resolveCaptureElementRegion(input) {
   const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
   const normalizeLower = value => normalize(value).toLowerCase();
+  const scope = String(input?.targetScope || 'auto');
+  const includeFrames = scope === 'allFrames' || scope === 'auto';
+  const includeShadow = scope === 'shadowDeep' || scope === 'auto';
+  const maxFrameDepth = Math.min(Math.max(Number(input?.frameDepth) || 2, 0), 6);
   const normalizeRegionLocal = raw => {
     const viewportWidth = Math.max(1, Number(raw.viewportWidth) || 1);
     const viewportHeight = Math.max(1, Number(raw.viewportHeight) || 1);
@@ -2292,16 +2690,73 @@ function resolveCaptureElementRegion(input) {
     return rect.width > 0 && rect.height > 0;
   };
 
+  const enumerateRoots = () => {
+    const contexts = [{ root: document, framePath: 'main' }];
+    const queue = [{ doc: document, framePath: 'main', depth: 0 }];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) {
+        continue;
+      }
+
+      if (includeShadow) {
+        for (const node of Array.from(current.doc.querySelectorAll('*'))) {
+          if (node.shadowRoot) {
+            contexts.push({ root: node.shadowRoot, framePath: current.framePath });
+          }
+        }
+      }
+
+      if (!includeFrames || current.depth >= maxFrameDepth) {
+        continue;
+      }
+
+      const frames = Array.from(current.doc.querySelectorAll('iframe'));
+      for (let i = 0; i < frames.length; i += 1) {
+        try {
+          const frameDoc = frames[i].contentDocument;
+          if (!frameDoc) {
+            continue;
+          }
+          const framePath = `${current.framePath}>iframe[${i}]`;
+          contexts.push({ root: frameDoc, framePath });
+          queue.push({ doc: frameDoc, framePath, depth: current.depth + 1 });
+        } catch {
+          // Ignore cross-origin frames.
+        }
+      }
+    }
+    return contexts;
+  };
+
+  const queryAll = selector => {
+    if (!selector) {
+      return [];
+    }
+    const found = [];
+    for (const context of enumerateRoots()) {
+      try {
+        for (const element of Array.from(context.root.querySelectorAll(selector))) {
+          found.push({ element, framePath: context.framePath });
+        }
+      } catch {
+        // Ignore invalid selectors for specific roots.
+      }
+    }
+    return found;
+  };
+
   const findTarget = () => {
     if (input?.selector) {
-      return document.querySelector(input.selector);
+      const matches = queryAll(input.selector);
+      return matches[0];
     }
 
     const roleQuery = input?.role ? `[role="${input.role}"]` : 'button,[role="button"],[role="tab"],a[href],input,textarea,select,[tabindex]';
-    const elements = Array.from(document.querySelectorAll(roleQuery)).filter(isVisible);
+    const elements = queryAll(roleQuery).filter(item => isVisible(item.element));
     const labelNeedle = normalizeLower(input?.label);
     if (labelNeedle) {
-      const matches = elements.filter(element => normalizeLower(element.getAttribute('aria-label') || element.getAttribute('title') || '').includes(labelNeedle));
+      const matches = elements.filter(item => normalizeLower(item.element.getAttribute('aria-label') || item.element.getAttribute('title') || '').includes(labelNeedle));
       if (matches.length > 0) {
         return matches[Math.max(0, Math.min(Number(input?.index) || 0, matches.length - 1))];
       }
@@ -2311,15 +2766,16 @@ function resolveCaptureElementRegion(input) {
     if (!textNeedle) {
       return undefined;
     }
-    const matches = elements.filter(element => normalizeLower(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title') || '').includes(textNeedle));
+    const matches = elements.filter(item => normalizeLower(item.element.innerText || item.element.value || item.element.getAttribute('aria-label') || item.element.getAttribute('title') || '').includes(textNeedle));
     if (matches.length === 0) {
       return undefined;
     }
     return matches[Math.max(0, Math.min(Number(input?.index) || 0, matches.length - 1))];
   };
 
-  const target = findTarget();
-  if (!target || !isVisible(target)) {
+  const resolved = findTarget();
+  const target = resolved?.element;
+  if (!resolved || !target || !isVisible(target)) {
     return { error: 'captureElement target not found.' };
   }
 
@@ -2344,7 +2800,8 @@ function resolveCaptureElementRegion(input) {
       tag: target.tagName.toLowerCase(),
       role: target.getAttribute('role') || undefined,
       text: normalize(target.innerText || target.value || target.getAttribute('aria-label') || target.getAttribute('title') || '').slice(0, 180),
-      selectorHint
+      selectorHint,
+      framePath: resolved.framePath
     }
   };
 }
