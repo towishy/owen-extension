@@ -6,6 +6,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-07-14
+
+- Redesigned the browser popup around clear bridge status, compact capture toggles, current-site permission state, accessible feedback, and collapsible connection settings.
+- Added live connection-status updates, pairing-token visibility control, and screenshot-dependent redaction controls.
+- Removed the manual investigation-name default and its capture fallback so the passive agent uses only investigation groups supplied by Copilot commands.
+
 ## [0.1.27] - 2026-07-14
 
 - Upgraded the local bridge to protocol 3.0 with command leases, explicit ACK/completion ownership, lease-expiry redelivery, and idempotent result acceptance.

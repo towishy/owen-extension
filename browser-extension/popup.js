@@ -1,7 +1,6 @@
 const DEFAULT_OPTIONS = {
   port: 17321,
   token: '',
-  investigationName: '',
   commandPolling: true,
   includeHtml: false,
   includeScreenshot: true,
@@ -11,7 +10,6 @@ const DEFAULT_OPTIONS = {
 const elements = {
   port: document.getElementById('port'),
   token: document.getElementById('token'),
-  investigationName: document.getElementById('investigationName'),
   commandPolling: document.getElementById('commandPolling'),
   includeHtml: document.getElementById('includeHtml'),
   includeScreenshot: document.getElementById('includeScreenshot'),
@@ -20,25 +18,58 @@ const elements = {
   connectionStatus: document.getElementById('connectionStatus'),
   grantSite: document.getElementById('grantSite'),
   save: document.getElementById('save'),
-  status: document.getElementById('status')
+  status: document.getElementById('status'),
+  statusLabel: document.getElementById('statusLabel'),
+  connectionHelp: document.getElementById('connectionHelp'),
+  feedback: document.getElementById('feedback'),
+  redactionRow: document.getElementById('redactionRow'),
+  toggleToken: document.getElementById('toggleToken')
 };
 
 loadOptions();
 
 elements.save.addEventListener('click', async () => {
+  elements.save.disabled = true;
   await saveOptions();
-  setStatus('Passive');
+  setFeedback('Settings saved. The browser agent is reconnecting.');
+  elements.save.textContent = 'Saved';
+  setTimeout(() => {
+    elements.save.disabled = false;
+    elements.save.textContent = 'Save changes';
+  }, 900);
 });
 
 elements.grantSite.addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url || !/^https?:/i.test(tab.url)) {
-    setStatus('Open an HTTP(S) page first');
+    setFeedback('Open an HTTP(S) page before granting access.');
     return;
   }
   const origin = `${new URL(tab.url).origin}/*`;
   const granted = await chrome.permissions.request({ origins: [origin] });
-  setStatus(granted ? 'Site access granted' : 'Site access denied');
+  setFeedback(granted ? `Access allowed for ${new URL(tab.url).hostname}.` : 'Site access was not granted.');
+  await updateSiteAccess();
+});
+
+elements.includeScreenshot.addEventListener('change', updateScreenshotControls);
+
+elements.toggleToken.addEventListener('click', () => {
+  const isHidden = elements.token.type === 'password';
+  elements.token.type = isHidden ? 'text' : 'password';
+  elements.toggleToken.textContent = isHidden ? 'Hide' : 'Show';
+  elements.toggleToken.setAttribute('aria-label', `${isHidden ? 'Hide' : 'Show'} pairing token`);
+  elements.toggleToken.title = `${isHidden ? 'Hide' : 'Show'} pairing token`;
+});
+
+document.querySelectorAll('input, select').forEach(element => {
+  element.addEventListener('change', () => setFeedback('Unsaved changes.'));
+  element.addEventListener('input', () => setFeedback('Unsaved changes.'));
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.owenBridgeConnectionStatus) {
+    updateConnectionStatus(changes.owenBridgeConnectionStatus.newValue);
+  }
 });
 
 async function loadOptions() {
@@ -54,16 +85,15 @@ async function loadOptions() {
   const options = { ...syncedOptions, token };
   elements.port.value = String(options.port);
   elements.token.value = options.token;
-  elements.investigationName.value = options.investigationName;
   elements.commandPolling.checked = options.commandPolling;
   elements.includeHtml.checked = options.includeHtml;
   elements.includeScreenshot.checked = options.includeScreenshot;
   elements.screenshotRedaction.value = options.screenshotRedaction;
   elements.agentId.textContent = localSecrets.owenBrowserAgentId || 'Created after polling starts';
   const connection = localSecrets.owenBridgeConnectionStatus;
-  elements.connectionStatus.textContent = connection?.ok
-    ? `Connected · protocol ${connection.protocolVersion}`
-    : connection?.error || 'Waiting for VS Code';
+  updateConnectionStatus(connection);
+  updateScreenshotControls();
+  await updateSiteAccess();
 }
 
 async function saveOptions() {
@@ -72,7 +102,6 @@ async function saveOptions() {
     chrome.storage.local.set({ token }),
     chrome.storage.sync.set({
     port: Number(elements.port.value || DEFAULT_OPTIONS.port),
-    investigationName: elements.investigationName.value.trim(),
     commandPolling: elements.commandPolling.checked,
     includeHtml: elements.includeHtml.checked,
     includeScreenshot: elements.includeScreenshot.checked,
@@ -83,6 +112,54 @@ async function saveOptions() {
   await chrome.runtime.sendMessage({ type: 'wake-command-polling' });
 }
 
-function setStatus(value) {
-  elements.status.textContent = value;
+function updateConnectionStatus(connection) {
+  if (connection?.ok) {
+    elements.connectionStatus.textContent = `Connected to VS Code on port ${elements.port.value}`;
+    elements.connectionHelp.textContent = `Bridge protocol ${connection.protocolVersion} is ready for browser actions.`;
+    setStatus('Connected', 'success');
+    return;
+  }
+
+  const error = connection?.error || '';
+  elements.connectionStatus.textContent = error || 'Waiting for VS Code';
+  if (/protocol mismatch/i.test(error)) {
+    elements.connectionHelp.textContent = 'Reload VS Code and update both extensions to the same version.';
+    setStatus('Action needed', 'danger');
+  } else if (error) {
+    elements.connectionHelp.textContent = 'Check the port and pairing token, then save again.';
+    setStatus('Offline', 'warning');
+  } else {
+    elements.connectionHelp.textContent = 'Open VS Code with Owen Browser Bridge enabled.';
+    setStatus('Waiting', 'waiting');
+  }
+}
+
+async function updateSiteAccess() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || !/^https?:/i.test(tab.url)) {
+    elements.grantSite.textContent = 'Open a website to allow access';
+    elements.grantSite.disabled = true;
+    return;
+  }
+  const origin = `${new URL(tab.url).origin}/*`;
+  const granted = await chrome.permissions.contains({ origins: [origin] });
+  elements.grantSite.textContent = granted
+    ? `Access allowed for ${new URL(tab.url).hostname}`
+    : 'Allow access to current site';
+  elements.grantSite.disabled = granted;
+}
+
+function updateScreenshotControls() {
+  const enabled = elements.includeScreenshot.checked;
+  elements.screenshotRedaction.disabled = !enabled;
+  elements.redactionRow.classList.toggle('is-disabled', !enabled);
+}
+
+function setStatus(value, tone) {
+  elements.statusLabel.textContent = value;
+  elements.status.dataset.tone = tone;
+}
+
+function setFeedback(value) {
+  elements.feedback.textContent = value;
 }

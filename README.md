@@ -55,11 +55,11 @@ Owen Browser Bridge has two components, and both must be installed:
 You can also install the downloaded VSIX from a terminal:
 
 ```powershell
-code --install-extension "$HOME\Downloads\owen-browser-bridge-0.1.27.vsix" --force
+code --install-extension "$HOME\Downloads\owen-browser-bridge-0.1.28.vsix" --force
 ```
 
 ```bash
-code --install-extension "$HOME/Downloads/owen-browser-bridge-0.1.27.vsix" --force
+code --install-extension "$HOME/Downloads/owen-browser-bridge-0.1.28.vsix" --force
 ```
 
 ### Option B. Build and install from the GitHub repository
@@ -139,6 +139,12 @@ After both extensions are installed, follow [Pairing Setup](#pairing-setup).
 
 The README keeps only the four most recent release highlights. See the full [CHANGELOG](CHANGELOG.md) or [GitHub Releases](https://github.com/towishy/owen-extension/releases) for complete history and downloadable assets.
 
+### 0.1.28
+
+- Redesigned the passive-agent popup around bridge health, compact capture controls, current-site permission state, and collapsible connection settings.
+- Added live connection updates, pairing-token visibility, screenshot-dependent redaction controls, and clearer status guidance.
+- Removed the manual investigation-name default so capture groups are supplied only by Copilot commands.
+
 ### 0.1.27
 
 - Added protocol 3.0 command leases, ACK/completion ownership, idempotent result delivery, a persisted browser outbox, and retry backoff.
@@ -155,11 +161,6 @@ The README keeps only the four most recent release highlights. See the full [CHA
 
 - Changed the browser extension into a passive paired agent controlled from VS Code after one-time setup.
 - Added near-immediate long-poll command delivery with a browser alarm recovery fallback.
-
-### 0.1.24
-
-- Added reusable generic and Microsoft Security scenario templates through `runScenarioTemplate`.
-- Added request-level custom template registries and parameter substitution.
 
 ## Pairing Setup
 
@@ -187,9 +188,9 @@ If the token ever needs to be replaced, click **Regenerate and Copy Token** and 
 4. Paste the copied token into **Pairing Token**.
 5. Optionally enter an **Investigation / Case** name such as `incident-12345` to group multiple tab captures together.
 6. Keep **Accept Copilot browser actions** enabled if you want Copilot to send safe browser actions through the paired extension.
-7. On the target HTTPS page, click **Grant current site access**. The browser extension requests access only for that origin; permanent `<all_urls>` access is not used.
+7. On the target HTTPS page, click **Allow access to current site**. The browser extension requests access only for that origin; permanent `<all_urls>` access is not used.
 8. Choose whether to include **screenshot** and **HTML snapshot**.
-9. Click **Save Settings**.
+9. Click **Save changes**.
 
 ### 4. Control and capture the active browser page from VS Code
 
@@ -220,7 +221,7 @@ Captured files are stored in the folder shown under **Capture Directory** on the
 
 1. Confirm the VS Code setup page shows **Server running** before opening the browser popup.
 2. Confirm the popup port matches `owenBrowserBridge.port`; the default is `17321`.
-3. Generate a fresh token with **Regenerate and Copy Token**, paste it into the popup, and click **Save Settings**.
+3. Generate a fresh token with **Regenerate and Copy Token**, paste it into the popup, and click **Save changes**.
 4. Check that local firewall or endpoint policy is not blocking loopback traffic to `127.0.0.1`.
 5. Reload the browser extension and run `Developer: Reload Window` in VS Code.
 
@@ -234,7 +235,7 @@ Open the extracted folders until `manifest.json` is visible, then select that ex
 
 Open `Owen Browser Bridge: Open Setup Page`, then use **Allowed Hosts** to add, edit, or remove accepted hosts. Exact hosts, full URLs, and wildcards such as `*.microsoft.com` are supported. Click **Allow All Domains** to accept captures and Copilot browser actions from any host, or **Restore Microsoft Defaults** to return to the default Microsoft security/admin portal list.
 
-If the result is `HOST_PERMISSION_REQUIRED`, open the browser popup while the target page is active and click **Grant current site access**. VS Code Allowed Hosts and browser site permission are separate checks; both must allow the target.
+If the result is `HOST_PERMISSION_REQUIRED`, open the browser popup while the target page is active and click **Allow access to current site**. VS Code Allowed Hosts and browser site permission are separate checks; both must allow the target.
 
 ### Change the capture directory
 

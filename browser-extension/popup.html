@@ -7,61 +7,115 @@
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <main>
-      <header>
-        <h1>Owen Browser Bridge Agent</h1>
-        <span id="status" aria-live="polite">Passive</span>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <p class="eyebrow">Browser agent</p>
+            <h1>Owen Bridge</h1>
+          </div>
+        </div>
+        <span id="status" class="status-badge" data-tone="waiting" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="statusLabel">Waiting</span>
+        </span>
       </header>
 
-      <p class="agent-note">VS Code controls the active browser tab after pairing. Keep this extension enabled; no manual tab sending is required.</p>
+      <section class="connection-panel" aria-labelledby="connectionHeading">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">Connection</p>
+            <h2 id="connectionHeading">Bridge status</h2>
+          </div>
+          <span class="protocol-chip">Protocol 3</span>
+        </div>
+        <p id="connectionStatus" class="connection-message">Checking VS Code...</p>
+        <p id="connectionHelp" class="connection-help">Keep VS Code open while the browser agent is active.</p>
+        <div class="agent-id-row">
+          <span>Agent ID</span>
+          <code id="agentId">Loading...</code>
+        </div>
+        <button id="grantSite" class="button secondary" type="button">Allow access to current site</button>
+      </section>
 
-      <dl class="agent-meta">
-        <div><dt>Agent</dt><dd id="agentId">Loading...</dd></div>
-        <div><dt>Bridge</dt><dd id="connectionStatus">Unknown</dd></div>
-      </dl>
+      <section class="settings-section" aria-label="Capture options">
+        <div class="setting-list">
+          <label class="toggle-row">
+            <span class="toggle-copy">
+              <strong>Accept Copilot actions</strong>
+              <small>Allow VS Code to control the active tab</small>
+            </span>
+            <span class="switch">
+              <input id="commandPolling" type="checkbox" checked>
+              <span class="switch-track" aria-hidden="true"></span>
+            </span>
+          </label>
 
-      <button id="grantSite" type="button">Grant current site access</button>
+          <label class="toggle-row">
+            <span class="toggle-copy">
+              <strong>Include screenshot</strong>
+              <small>Attach the visible page to each capture</small>
+            </span>
+            <span class="switch">
+              <input id="includeScreenshot" type="checkbox" checked>
+              <span class="switch-track" aria-hidden="true"></span>
+            </span>
+          </label>
 
-      <label>
-        VS Code Port
-        <input id="port" type="number" min="1024" max="65535" value="17321">
-      </label>
+          <label class="select-row" id="redactionRow">
+            <span class="toggle-copy">
+              <strong>Screenshot redaction</strong>
+              <small>Mask sensitive visual content</small>
+            </span>
+            <select id="screenshotRedaction" aria-label="Screenshot redaction">
+              <option value="standard">Standard</option>
+              <option value="strict">Strict</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
 
-      <label>
-        Pairing Token
-        <input id="token" type="password" autocomplete="off" placeholder="Paste token from VS Code">
-      </label>
+          <label class="toggle-row">
+            <span class="toggle-copy">
+              <strong>Include HTML snapshot</strong>
+              <small>Store page markup for deeper analysis</small>
+            </span>
+            <span class="switch">
+              <input id="includeHtml" type="checkbox">
+              <span class="switch-track" aria-hidden="true"></span>
+            </span>
+          </label>
+        </div>
+      </section>
 
-      <label>
-        Investigation / Case
-        <input id="investigationName" type="text" autocomplete="off" placeholder="Optional, e.g. incident-12345">
-      </label>
+      <details class="advanced-settings">
+        <summary>
+          <span>
+            <strong>Connection settings</strong>
+            <small>Port and pairing token</small>
+          </span>
+          <span class="chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="advanced-content">
+          <label class="field">
+            <span>VS Code port</span>
+            <input id="port" type="number" min="1024" max="65535" value="17321">
+          </label>
 
-      <label class="row">
-        <input id="includeScreenshot" type="checkbox" checked>
-        <span>Include screenshot</span>
-      </label>
+          <label class="field">
+            <span>Pairing token</span>
+            <span class="input-action">
+              <input id="token" type="password" autocomplete="off" placeholder="Paste token from VS Code">
+              <button id="toggleToken" type="button" aria-label="Show pairing token" title="Show pairing token">Show</button>
+            </span>
+          </label>
+        </div>
+      </details>
 
-      <label>
-        Screenshot redaction
-        <select id="screenshotRedaction">
-          <option value="standard">Standard</option>
-          <option value="strict">Strict</option>
-          <option value="off">Off</option>
-        </select>
-      </label>
-
-      <label class="row">
-        <input id="includeHtml" type="checkbox">
-        <span>Include HTML snapshot</span>
-      </label>
-
-      <label class="row">
-        <input id="commandPolling" type="checkbox" checked>
-        <span>Accept Copilot browser actions</span>
-      </label>
-
-      <button id="save" type="button">Save Settings</button>
+      <footer class="action-bar">
+        <p id="feedback" role="status" aria-live="polite">Changes apply after you save.</p>
+        <button id="save" class="button primary" type="button">Save changes</button>
+      </footer>
     </main>
     <script src="popup.js"></script>
   </body>

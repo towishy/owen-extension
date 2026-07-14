@@ -114,10 +114,10 @@ The local server listens on `http://127.0.0.1:17321` by default.
 9. Optionally enter an **Investigation / Case** name such as `incident-12345` when you plan to capture several tabs for the same investigation.
 10. Keep **Accept Copilot browser actions** enabled if you want Copilot to control the paired browser on allowed hosts.
 11. Select whether to include **screenshot** and **HTML snapshot**.
-12. Open the target HTTPS page and click **Grant current site access** in the popup.
-13. Click **Save Settings**.
+12. Open the target HTTPS page and click **Allow access to current site** in the popup.
+13. Click **Save changes**.
 
-If you need to rotate the token, click **Regenerate and Copy Token** on the setup page, then paste the new token into the browser extension and click **Save Settings** again.
+If you need to rotate the token, click **Regenerate and Copy Token** on the setup page, then paste the new token into the browser extension and click **Save changes** again.
 
 ## 5. Control and Capture a Portal Page from VS Code
 
@@ -235,7 +235,7 @@ By default, the VS Code extension accepts captures only from:
 
 Use **Allowed Hosts** on `Owen Browser Bridge: Open Setup Page` to add, edit, or remove accepted domains. Exact hosts, full URLs, and wildcards such as `*.microsoft.com` are supported. Click **Allow All Domains** to accept captures and Copilot browser actions from any host, or **Restore Microsoft Defaults** to return to the default Microsoft security/admin portal list.
 
-Browser site access is a separate permission layer. The manifest permanently permits only `127.0.0.1` and `localhost`; while the target page is active, use **Grant current site access** in the browser popup for that origin.
+Browser site access is a separate permission layer. The manifest permanently permits only `127.0.0.1` and `localhost`; while the target page is active, use **Allow access to current site** in the browser popup for that origin.
 
 You can also update `owenBrowserBridge.allowedHosts` directly in VS Code settings. Set it to an empty array only for a controlled local test.
 
@@ -286,7 +286,7 @@ Open `Owen Browser Bridge: Open Setup Page` and add that page's hostname under *
 
 ### `#browserAct` reports `HOST_PERMISSION_REQUIRED`
 
-Open the target page, open the Owen Browser Bridge Agent popup, and click **Grant current site access**. Browser permission and VS Code Allowed Hosts must both permit the page.
+Open the target page, open the Owen Browser Bridge Agent popup, and click **Allow access to current site**. Browser permission and VS Code Allowed Hosts must both permit the page.
 
 ### Multiple browser agents are active
 
@@ -297,7 +297,7 @@ Copy the required agent id from its browser popup and add `"targetAgentId": "age
 1. Run `Owen Browser Bridge: Open Setup Page` in VS Code.
 2. Click **Copy Pairing Token**.
 3. Paste the token into the browser popup.
-4. Click **Save Settings**.
+4. Click **Save changes**.
 5. Retry the action from Copilot Chat.
 
 ### `#browserAct` times out

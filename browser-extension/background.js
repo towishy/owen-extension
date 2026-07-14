@@ -3,7 +3,6 @@ importScripts('protocol-runtime.js');
 const DEFAULT_OPTIONS = {
   port: 17321,
   token: '',
-  investigationName: '',
   commandPolling: true,
   includeHtml: false,
   includeScreenshot: true,
@@ -4064,7 +4063,6 @@ async function captureCurrentTab() {
     source: 'owen-browser-capture',
     version: chrome.runtime.getManifest().version,
     collectedAt: new Date().toISOString(),
-    investigation: options.investigationName ? { name: options.investigationName } : undefined,
     page: {
       url: tab.url,
       title: tab.title ?? pageSnapshot.title,
@@ -4125,7 +4123,7 @@ async function createCapturePayload(tab, command, options, screenshotOverride) {
     source: 'owen-browser-capture',
     version: chrome.runtime.getManifest().version,
     collectedAt: new Date().toISOString(),
-    investigation: command.investigationName ? { name: command.investigationName } : options.investigationName ? { name: options.investigationName } : undefined,
+    investigation: command.investigationName ? { name: command.investigationName } : undefined,
     browserSession,
     page: {
       url: tab.url,
