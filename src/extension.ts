@@ -775,7 +775,7 @@ function createLatestCaptureTool(context: vscode.ExtensionContext): vscode.Langu
 			const latest = context.globalState.get<StoredCapture>('latestCapture');
 			if (!latest) {
 				return new vscode.LanguageModelToolResult([
-					vscode.LanguageModelDataPart.text('No browser capture has been received yet.', 'text/plain')
+					new vscode.LanguageModelTextPart('No browser capture has been received yet.')
 				]);
 			}
 
@@ -793,13 +793,13 @@ function createBrowserStateTool(context: vscode.ExtensionContext): vscode.Langua
 			const state = context.globalState.get<BrowserSessionState>('latestBrowserState');
 			if (!state) {
 				return new vscode.LanguageModelToolResult([
-					vscode.LanguageModelDataPart.text('No browser state has been captured yet. Use #browserAct with readPage or capture first.', 'text/plain')
+					new vscode.LanguageModelTextPart('No browser state has been captured yet. Use #browserAct with readPage or capture first.')
 				]);
 			}
 
 			return new vscode.LanguageModelToolResult([
 				vscode.LanguageModelDataPart.json(state),
-				vscode.LanguageModelDataPart.text(renderBrowserStateMessage(state), 'text/plain')
+				new vscode.LanguageModelTextPart(renderBrowserStateMessage(state))
 			]);
 		},
 		prepareInvocation() {
@@ -819,7 +819,7 @@ function createReadCaptureTool(context: vscode.ExtensionContext): vscode.Languag
 
 			if (!idOrPath) {
 				return new vscode.LanguageModelToolResult([
-					vscode.LanguageModelDataPart.text('No capture id or path was provided, and there is no latest capture.', 'text/plain')
+					new vscode.LanguageModelTextPart('No capture id or path was provided, and there is no latest capture.')
 				]);
 			}
 
@@ -851,7 +851,7 @@ function createSearchCapturesTool(context: vscode.ExtensionContext): vscode.Lang
 			const results = await searchCaptureCatalog(context, options.input);
 			return new vscode.LanguageModelToolResult([
 				vscode.LanguageModelDataPart.json({ count: results.length, captures: results }),
-				vscode.LanguageModelDataPart.text(renderCaptureSearchResults(results), 'text/plain')
+				new vscode.LanguageModelTextPart(renderCaptureSearchResults(results))
 			]);
 		},
 		prepareInvocation(options) {
@@ -866,7 +866,7 @@ function createBrowserActTool(context: vscode.ExtensionContext): vscode.Language
 			const { command, completion } = await invokeBrowserAction(context, options.input);
 			return new vscode.LanguageModelToolResult([
 				vscode.LanguageModelDataPart.json({ command, completion }),
-				vscode.LanguageModelDataPart.text(renderBrowserActMessage(command, completion), 'text/plain')
+				new vscode.LanguageModelTextPart(renderBrowserActMessage(command, completion))
 			]);
 		},
 		prepareInvocation(options) {
@@ -885,7 +885,7 @@ function createCategorizedBrowserTool(context: vscode.ExtensionContext, category
 			const { command, completion } = await invokeBrowserAction(context, options.input);
 			return new vscode.LanguageModelToolResult([
 				vscode.LanguageModelDataPart.json({ command, completion }),
-				vscode.LanguageModelDataPart.text(renderBrowserActMessage(command, completion), 'text/plain')
+				new vscode.LanguageModelTextPart(renderBrowserActMessage(command, completion))
 			]);
 		},
 		prepareInvocation(options) {
@@ -1898,9 +1898,9 @@ async function captureToolResult(capture: StoredCapture) {
 	const json = await fs.readFile(capture.jsonPath, 'utf8').then(text => JSON.parse(text)).catch(() => undefined);
 	return new vscode.LanguageModelToolResult([
 		vscode.LanguageModelDataPart.json(capture),
-		vscode.LanguageModelDataPart.text(markdown, 'text/markdown'),
+		new vscode.LanguageModelTextPart(markdown),
 		...(json ? [vscode.LanguageModelDataPart.json(json)] : []),
-		vscode.LanguageModelDataPart.text(capture.screenshotPath ? `Screenshot path: ${capture.screenshotPath}` : 'No screenshot was stored.', 'text/plain')
+		new vscode.LanguageModelTextPart(capture.screenshotPath ? `Screenshot path: ${capture.screenshotPath}` : 'No screenshot was stored.')
 	]);
 }
 
@@ -1917,9 +1917,9 @@ async function captureGroupToolResult(summary: CaptureGroupSummary) {
 	const summaryMarkdown = await fs.readFile(path.join(summary.folder, '_summary.md'), 'utf8').catch(() => renderCaptureGroupMarkdown(summary));
 	return new vscode.LanguageModelToolResult([
 		vscode.LanguageModelDataPart.json(summary),
-		vscode.LanguageModelDataPart.text(summaryMarkdown, 'text/markdown'),
+		new vscode.LanguageModelTextPart(summaryMarkdown),
 		vscode.LanguageModelDataPart.json(captures),
-		vscode.LanguageModelDataPart.text('Analyze these browser captures as one related investigation. Correlate URLs, timestamps, entities, visible evidence, screenshots, missing context, risk, and next actions.', 'text/plain')
+		new vscode.LanguageModelTextPart('Analyze these browser captures as one related investigation. Correlate URLs, timestamps, entities, visible evidence, screenshots, missing context, risk, and next actions.')
 	]);
 }
 

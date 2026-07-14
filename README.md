@@ -139,6 +139,12 @@ After both extensions are installed, follow [Pairing Setup](#pairing-setup).
 
 The README keeps only the four most recent release highlights. See the full [CHANGELOG](CHANGELOG.md) or [GitHub Releases](https://github.com/towishy/owen-extension/releases) for complete history and downloadable assets.
 
+### 0.1.29
+
+- Fixed empty Copilot tool responses by exposing browser-state, capture, and action summaries as `LanguageModelTextPart` values while preserving structured JSON parts.
+- Added direct `vscode.lm.invokeTool` regression coverage for non-empty capture and browser-state results.
+- Changed the browser popup to a 460 px, two-column compact layout that avoids scrollbars even when connection settings are expanded.
+
 ### 0.1.28
 
 - Redesigned the passive-agent popup around bridge health, compact capture controls, current-site permission state, and collapsible connection settings.
@@ -156,11 +162,6 @@ The README keeps only the four most recent release highlights. See the full [CHA
 - Added expiring command queues, lifecycle health metrics, screenshot redaction, and observable action-effect policies.
 - Added persisted cancellable browser jobs, capture search and retention, compact category tools, and versioned scenario templates.
 - Expanded `runtimeSnapshot` with navigation timing, paint, LCP, CLS, and long-task metrics.
-
-### 0.1.25
-
-- Changed the browser extension into a passive paired agent controlled from VS Code after one-time setup.
-- Added near-immediate long-poll command delivery with a browser alarm recovery fallback.
 
 ## Pairing Setup
 
@@ -252,6 +253,8 @@ The VS Code extension contributes these Language Model Tools:
 - `#searchBrowserCaptures`: searches the global local capture catalog by text, host, group, and date
 - `#browserRead`, `#browserInteract`, `#browserWorkflow`, `#browserEvidence`, `#browserAdmin`: compact category-specific action tools
 - `#browserAct`: compatibility tool exposing every browser action and input
+
+Tool results expose readable summaries and capture Markdown as `LanguageModelTextPart` values, with structured payloads retained as JSON data parts. This keeps results visible in Copilot Chat while preserving machine-readable state for compatible callers.
 
 Each Chrome/Edge installation keeps a stable browser agent id. With one active agent, routing is automatic. With multiple active agents, pass `targetAgentId` or set `owenBrowserBridge.preferredAgentId`; the bridge refuses ambiguous routing instead of choosing silently.
 

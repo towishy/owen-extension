@@ -181,6 +181,22 @@ suite('Extension Test Suite', () => {
 		}
 	});
 
+	test('browser read tools expose non-empty text parts', async () => {
+		const extension = vscode.extensions.getExtension('towishy.owen-browser-bridge');
+		assert.ok(extension);
+		await extension.activate();
+
+		for (const toolName of ['get_latest_browser_capture', 'get_browser_state', 'read_browser_capture']) {
+			const result = await vscode.lm.invokeTool(toolName, {
+				input: {},
+				toolInvocationToken: undefined
+			});
+			const textParts = result.content.filter(part => part instanceof vscode.LanguageModelTextPart);
+			assert.ok(textParts.length > 0, `${toolName} returned no LanguageModelTextPart`);
+			assert.ok(textParts.some(part => part.value.trim().length > 0), `${toolName} returned only empty text`);
+		}
+	});
+
 	test('package and browser manifest versions stay aligned', async () => {
 		const packageJson = JSON.parse(await fs.readFile(path.resolve(__dirname, '../../package.json'), 'utf8'));
 		const manifest = JSON.parse(await fs.readFile(path.resolve(__dirname, '../../browser-extension/manifest.json'), 'utf8'));

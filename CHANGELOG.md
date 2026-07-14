@@ -6,6 +6,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-07-14
+
+- Fixed empty Copilot tool responses by returning user-readable tool output as `LanguageModelTextPart` while retaining structured JSON data parts.
+- Added an extension-host regression test that invokes the capture and browser-state tools and verifies non-empty text results.
+- Reworked the browser popup into a wider two-column layout that stays within the Chromium popup viewport with connection settings collapsed or expanded.
+
 ## [0.1.28] - 2026-07-14
 
 - Redesigned the browser popup around clear bridge status, compact capture toggles, current-site permission state, accessible feedback, and collapsible connection settings.

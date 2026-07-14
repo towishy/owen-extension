@@ -54,6 +54,8 @@ In GitHub Copilot Chat, use the contributed tool reference names:
 
 Some agent hosts may expose the underlying tool ids such as `browser_act` or `get_browser_state`. If `#browserAct` or `#getBrowserState` is unavailable, try the snake_case id or inspect the available tool list.
 
+The tools return readable summaries and capture Markdown as `LanguageModelTextPart` values and retain structured payloads as JSON data parts. If a host shows an empty tool response, verify that it is running version 0.1.29 or newer and reload the VS Code window after installing the VSIX.
+
 `#browserAct { "action": "readPage" }` and `#getBrowserState` return `screenSummary`, a compact structured page state for agent planning. Prefer it over raw visible text when choosing selectors or deciding the next action. It includes headings, landmarks, interactables, form fields, tables, viewport, a text sample, and capture quality findings.
 
 ## Direct HTTP Mode
