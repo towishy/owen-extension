@@ -12,9 +12,7 @@ Use this section for a different Windows PC or a Mac.
 ### Install both extensions from GitHub Release
 
 1. Open <https://github.com/towishy/owen-extension/releases>.
-2. Download both release assets:
-  - `owen-browser-bridge-*.vsix`
-  - `owen-browser-capture-browser-extension-*.zip`
+2. Download `owen-browser-bridge-*.vsix` and `owen-browser-capture-browser-extension-*.zip` from **Assets**.
 3. In VS Code, press `Ctrl+Shift+P` on Windows/Linux or `Cmd+Shift+P` on macOS.
 4. Run `Extensions: Install from VSIX...`.
 5. Select the downloaded `.vsix` file.
@@ -27,9 +25,8 @@ Use this section for a different Windows PC or a Mac.
 ```powershell
 git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-extension
 Set-Location C:\OWEN\github\owen-extension
-npm install
-npm run package
-code --install-extension .\owen-browser-bridge-0.1.25.vsix --force
+npm ci
+npm run release:local
 ```
 
 macOS terminal:
@@ -37,14 +34,16 @@ macOS terminal:
 ```bash
 git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
-npm install
-npm run package
-code --install-extension ./owen-browser-bridge-0.1.25.vsix --force
+npm ci
+npm run release:local
 ```
 
 If `code` is unavailable, open VS Code and run `Shell Command: Install 'code' command in PATH`.
 
+`release:local` writes the verified assets to `dist/` and installs `dist/owen-browser-bridge-<version>.vsix`. Extract `dist/owen-browser-capture-browser-extension-<version>.zip`, then load the versioned folder that directly contains `manifest.json`.
+
 ### Install the browser extension from release ZIP or cloned repo
+
 Microsoft Edge:
 
 1. Open `edge://extensions`.

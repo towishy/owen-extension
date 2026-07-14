@@ -124,68 +124,114 @@ Captures are saved under `raw/browser-captures/<host>/<group>/` by default as JS
 
 ## Install From GitHub
 
-Use these steps when installing Owen Browser Bridge on another Windows PC or on macOS.
+Owen Browser Bridge has two components, and both must be installed:
+
+- **VS Code extension** (`owen-browser-bridge-<version>.vsix`): runs the local bridge, stores captures, and exposes Copilot tools.
+- **Edge/Chrome extension** (`owen-browser-capture-browser-extension-<version>.zip`): reads and controls the active browser tab after pairing.
+
+### Requirements
+
+- VS Code `1.120.0` or later.
+- Microsoft Edge or Google Chrome with permission to load an unpacked extension.
+- Local access to `127.0.0.1`. The default bridge port is `17321`.
+- Node.js `22` and Git only when building from source. They are not required for release asset installation.
 
 ### Option A. Install both extensions from a GitHub Release
 
 1. Open <https://github.com/towishy/owen-extension/releases>.
-2. Download both release assets:
-	- `owen-browser-bridge-*.vsix`
-	- `owen-browser-capture-browser-extension-*.zip`
-3. In VS Code, press `Ctrl+Shift+P` on Windows/Linux or `Cmd+Shift+P` on macOS.
-4. Run `Extensions: Install from VSIX...`.
-5. Select the downloaded `.vsix` file.
-6. Extract `owen-browser-capture-browser-extension-*.zip` to a local folder.
-7. Load the extracted folder as an unpacked Chrome/Edge extension.
-8. Run `Developer: Reload Window` if the `Owen Browser Bridge` commands do not appear immediately.
+2. Open the newest non-draft release and download both assets shown under **Assets**.
+3. Install `owen-browser-bridge-<version>.vsix` in VS Code:
+   - Open the Command Palette with `Ctrl+Shift+P` on Windows/Linux or `Cmd+Shift+P` on macOS.
+   - Run `Extensions: Install from VSIX...`.
+   - Select the downloaded VSIX and wait for the installation confirmation.
+   - Run `Developer: Reload Window` if the Owen Browser Bridge commands do not appear.
+4. Extract `owen-browser-capture-browser-extension-<version>.zip` to a permanent local folder. Do not run the browser extension directly from inside the ZIP.
+5. Open the extracted versioned folder and confirm that `manifest.json`, `background.js`, `popup.html`, `popup.js`, and `popup.css` are directly inside it.
+6. Load that folder in Edge or Chrome using the [browser extension steps](#install-the-browser-extension).
+7. Complete [Pairing Setup](#pairing-setup).
+
+You can also install the downloaded VSIX from a terminal:
+
+```powershell
+code --install-extension "$HOME\Downloads\owen-browser-bridge-0.1.26.vsix" --force
+```
+
+```bash
+code --install-extension "$HOME/Downloads/owen-browser-bridge-0.1.26.vsix" --force
+```
 
 ### Option B. Build and install from the GitHub repository
+
+Clone the repository and use `npm ci` so the dependency versions match `package-lock.json`. `npm run release:local` compiles, lints, packages both extensions, verifies the assets, and installs the generated VSIX into local VS Code.
 
 Windows PowerShell:
 
 ```powershell
 git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-extension
 Set-Location C:\OWEN\github\owen-extension
-npm install
-npm run package
-code --install-extension .\owen-browser-bridge-0.1.26.vsix --force
+npm ci
+npm run release:local
+
+$version = (Get-Content .\package.json -Raw | ConvertFrom-Json).version
+$browserZip = ".\dist\owen-browser-capture-browser-extension-$version.zip"
+$browserFolder = "$HOME\Applications\OwenBrowserBridge-$version"
+New-Item -ItemType Directory -Force -Path $browserFolder | Out-Null
+Expand-Archive -Path $browserZip -DestinationPath $browserFolder -Force
+Write-Host "Load unpacked: $browserFolder\owen-browser-capture-browser-extension-$version"
 ```
 
-macOS terminal:
+macOS Terminal:
 
 ```bash
 git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
-npm install
-npm run package
-code --install-extension ./owen-browser-bridge-0.1.26.vsix --force
+npm ci
+npm run release:local
+
+VERSION=$(node -p "require('./package.json').version")
+BROWSER_DIR="$HOME/Applications/OwenBrowserBridge-$VERSION"
+mkdir -p "$BROWSER_DIR"
+unzip -o "./dist/owen-browser-capture-browser-extension-$VERSION.zip" -d "$BROWSER_DIR"
+echo "Load unpacked: $BROWSER_DIR/owen-browser-capture-browser-extension-$VERSION"
 ```
 
-If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
+Generated release files are written to `dist/`. To package without installing the VSIX, run `npm run release:check` instead. If the `code` command is unavailable on macOS, open VS Code and run `Shell Command: Install 'code' command in PATH`. On Windows, reinstall VS Code with **Add to PATH** enabled or install the VSIX through the Command Palette.
 
-### Install the browser extension from the release ZIP or cloned repository
+### Install the browser extension
 
-The Chrome/Edge browser extension is loaded separately from the VS Code extension.
+The browser extension is loaded separately from the VS Code extension. Select the folder that directly contains `manifest.json`; selecting its parent causes a manifest-not-found error.
 
-If you downloaded `owen-browser-capture-browser-extension-*.zip` from a release, extract it first and select the extracted folder in the browser's **Load unpacked** dialog.
+Use one of these folders:
+
+- Release asset: the versioned folder created by extracting `owen-browser-capture-browser-extension-<version>.zip`.
+- Source checkout: `browser-extension` in the cloned repository.
 
 Microsoft Edge:
 
 1. Open `edge://extensions`.
 2. Enable **Developer mode**.
 3. Click **Load unpacked**.
-4. Select the extracted release folder or the cloned `browser-extension` folder.
-	- Windows: `C:\OWEN\github\owen-extension\browser-extension`
-	- macOS: `~/github/owen-extension/browser-extension`
+4. Select the folder that directly contains `manifest.json`.
+5. Pin **Owen Browser Bridge Agent** from the Extensions menu for easier pairing and status checks.
 
 Google Chrome:
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Click **Load unpacked**.
-4. Select the extracted release folder or the cloned `browser-extension` folder.
+4. Select the folder that directly contains `manifest.json`.
+5. Pin **Owen Browser Bridge Agent** from the Extensions menu.
 
 After both extensions are installed, follow [Pairing Setup](#pairing-setup).
+
+### Update an existing installation
+
+1. Install the newer VSIX with `Extensions: Install from VSIX...` or `code --install-extension <path-to-vsix> --force`.
+2. Run `Developer: Reload Window` in VS Code.
+3. Extract the new browser ZIP and replace the files in the same unpacked-extension folder. Keeping the same folder preserves the browser extension identity and local pairing storage.
+4. Open `edge://extensions` or `chrome://extensions` and click **Reload** on Owen Browser Bridge Agent.
+5. Open the browser popup and confirm the port, pairing status, screenshot redaction profile, and **Accept Copilot browser actions** setting.
+6. If you loaded the update from a different folder, copy a newly generated pairing token from VS Code and pair again.
 
 ## Pairing Setup
 
@@ -222,6 +268,14 @@ If the token ever needs to be replaced, click **Regenerate and Copy Token** and 
 2. In Copilot Chat, call `#browserAct { "action": "capture", "captureAfter": true, "includeScreenshot": true }` or ask Copilot to inspect the current tab.
 3. Use `#getBrowserState` to read the active tab state, or run `Owen Browser Bridge: Show Latest Capture` to open the saved Markdown note.
 
+### 5. Verify the installation
+
+1. Confirm the setup page shows the local server as running on `127.0.0.1:17321` or your configured port.
+2. Confirm the browser popup reports a saved pairing token and keeps **Accept Copilot browser actions** enabled.
+3. Open an allowed test page and run `#getBrowserState` in Copilot Chat.
+4. Run `#browserAct { "action": "capture", "captureAfter": true, "includeScreenshot": true }`.
+5. Run `Owen Browser Bridge: Show Latest Capture` and verify that the Markdown, JSON, and optional PNG were written under the configured Capture Directory.
+
 The browser popup is passive after pairing. It does not need to remain open, and there is no manual tab-send step.
 
 Captured files are stored in the folder shown under **Capture Directory** on the setup page. The default layout is `raw/browser-captures/<host>/<group>/` under the current workspace. If **Investigation / Case** is empty, the extension tries to infer an incident or alert id from the URL, then falls back to the capture date.
@@ -231,6 +285,20 @@ Captured files are stored in the folder shown under **Capture Directory** on the
 1. Confirm the VSIX is installed in VS Code.
 2. Run `Developer: Reload Window` from the Command Palette.
 3. Search again for `Owen Browser Bridge` in `Ctrl+Shift+P`.
+
+### If the browser cannot connect or pairing fails
+
+1. Confirm the VS Code setup page shows **Server running** before opening the browser popup.
+2. Confirm the popup port matches `owenBrowserBridge.port`; the default is `17321`.
+3. Generate a fresh token with **Regenerate and Copy Token**, paste it into the popup, and click **Save Settings**.
+4. Check that local firewall or endpoint policy is not blocking loopback traffic to `127.0.0.1`.
+5. Reload the browser extension and run `Developer: Reload Window` in VS Code.
+
+Never paste the pairing token into chat, issue trackers, screenshots, or committed files.
+
+### If Load unpacked reports a manifest error
+
+Open the extracted folders until `manifest.json` is visible, then select that exact folder. The release ZIP contains one versioned top-level folder, so selecting the extraction parent is one level too high.
 
 ### If the browser says a host is not allowed
 
