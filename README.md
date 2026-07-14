@@ -11,104 +11,6 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
-## New in 0.1.26
-
-- Browser commands now expire, leave the queue on timeout, respect a configurable queue limit, and report lifecycle metrics from `/health`.
-- Pairing tokens are stored in browser-local storage instead of browser-sync storage; existing tokens migrate automatically.
-- PNG captures support `standard`, `strict`, and `off` screenshot redaction. Standard masks secret/email fields; strict also masks inputs and visible email, IP, and GUID values.
-- Interactive actions support `effectPolicy: none | observe | require` to identify clicks, typing, scrolling, and selections that produced no observable page effect.
-- Browser jobs run one persisted step at a time so cancellation can be delivered between steps and interrupted jobs can continue after service-worker recovery.
-- `#searchBrowserCaptures` searches a global local catalog. Optional age/count retention keeps large capture stores bounded.
-- Compact `#browserRead`, `#browserInteract`, `#browserWorkflow`, `#browserEvidence`, and `#browserAdmin` tools reduce action-schema overhead; `#browserAct` remains compatible.
-- Versioned scenario templates can be listed, saved, deleted, exported, and reused from browser-local storage.
-- `runtimeSnapshot` now includes navigation timing, paint, LCP, CLS, and long-task metrics.
-
-## New in 0.1.25
-
-- The browser extension now acts as a passive paired agent. After one-time setup, VS Code controls the active tab through `#browserAct`; opening the popup or manually sending a tab is not required.
-- Long-poll command delivery provides near-immediate control while the 30-second browser alarm remains as a service-worker recovery fallback.
-- The popup now contains pairing and capture-default settings only.
-
-## New in 0.1.24
-
-- Added `runScenarioTemplate` for reusable browser automation scenario templates.
-- Added 10 built-in generic templates for readiness, evidence review, guarded actions, tab/auth flows, form fill, downloads, recovery, drilldown, handoff, and browser jobs.
-- Added Microsoft Security templates for Defender XDR incident triage, Sentinel log collection, Entra risky sign-in review, MDE/MDO/MDI/Purview/Defender for Cloud evidence capture, and security portal handoff.
-- Added custom `scenarioTemplates` support so teams can pass local template registries with `params`.
-
-## New in 0.1.23
-
-- Added `tabOrchestrator` to classify and manage browser tabs by logical role.
-- Added `popupGuard` to warn or block on unexpected popups, auth tabs, permission pages, and security warnings.
-- Added `returnToTab` to return to a role such as `main`, `auth`, `callback`, `download`, or `detail`.
-- Added `tabRunSummary` to summarize tab roles, signals, and recommended next actions.
-
-## New in 0.1.22
-
-- Added `failureExplainer` to explain recent automation failures and recommend recovery actions.
-- Added `waitProfiler` to compare readiness wait strategies on the current page.
-- Added `automationHealthScore` to score the current browser session for automation readiness.
-- Added `sensitiveActionGuard` to block or warn on potentially destructive browser actions.
-
-## New in 0.1.21
-
-- Added `safeActionPreview` to preview targets and confirmation risk before click/type-style actions.
-- Added `stableTargetProfile` to rank selector, text, role, and accessibility target candidates by stability.
-- Added `guidedDrilldown` to open matching table/list rows and collect detail panel evidence.
-- Added `evidenceCompletenessCheck` to check capture-group evidence coverage and write completeness reports.
-
-## New in 0.1.20
-
-- Added `planAndRun` to turn a goal into a guarded browser workflow using existing readiness, contract, table, and highlight actions.
-- Added `evidenceClaimCheck` to compare a report claim against visible page text and table rows.
-- Added `tableWatchAndDiff` to watch table rows and report added, removed, and changed records.
-- Added `browserRunBundle` to assemble capture-group run bundles with manifests, action logs, and capture references.
-
-## New in 0.1.19
-
-- Added `buildEvidencePack` to assemble capture-group evidence pack Markdown/JSON artifacts.
-- Added `buildNavigationGraph` to summarize recent browser action flow as graph artifacts.
-- Added `waitPreset` and `assertPageContract` for portal readiness and contract checks.
-- Added `createHandoff`, `selectorHealthReport`, `captureReviewQueue`, and lightweight browser job actions for operational follow-up.
-
-## New in 0.1.18
-
-- Added `accessibilitySnapshot` for role/name-oriented page structure inspection.
-- Added `mapForm` to inspect form field schemas before filling.
-- Added `watchPageChanges` to observe short-window DOM, URL, text, and resource changes.
-- Added `highlightEvidence` to create screenshot evidence with labeled highlight boxes.
-
-## New in 0.1.16
-
-- Added `visualAssert` for post-action text, selector, and page fingerprint assertions.
-- Added selector memory so successful and auto-healed targets can be reused per host and intent.
-- Added `Owen Browser Bridge: Show Action Trace` to inspect recent action logs from VS Code.
-- Added configurable capture redaction profiles: `off`, `standard`, and `strict`, plus custom regex patterns.
-
-## New in 0.1.15
-
-- Added deep target lookup across Shadow DOM and same-origin iframes with `targetScope` and `frameDepth`.
-- Added `networkIdle` and `requestDone` wait conditions.
-- Added `retryProfile`, `captureBeforeAfter`, `recordWorkflow`, and `replayWorkflow`.
-
-## New in 0.1.14
-
-- Added `captureElement` for selector/targetHint-based panel or box evidence capture.
-- Added `captureRegion` for explicit rectangle evidence capture by coordinates.
-- Added region inputs: `regionX`, `regionY`, `regionWidth`, `regionHeight`, and `regionPadding`.
-
-## New in 0.1.13
-
-- Browser extension display name is now "Owen Browser Bridge Agent" in the extension list and popup.
-
-## New in 0.1.12
-
-- Target inspection with `inspectTargets` ranks visual and accessibility candidates before clicking or typing.
-- Auto-healing target actions with `targetHint` and `autoHeal` retry likely candidates when selectors or text fail.
-- Capture quality scoring reports auth, loading, and low-evidence states in `screenSummary.captureQuality`.
-- Paired browser tab detection now accepts valid tab id `0` from Chrome or Edge.
-- `readPage` and capture snapshots correctly include page state after capture quality scoring.
-
 ## What It Captures
 
 - Current tab URL and title
@@ -232,6 +134,30 @@ After both extensions are installed, follow [Pairing Setup](#pairing-setup).
 4. Open `edge://extensions` or `chrome://extensions` and click **Reload** on Owen Browser Bridge Agent.
 5. Open the browser popup and confirm the port, pairing status, screenshot redaction profile, and **Accept Copilot browser actions** setting.
 6. If you loaded the update from a different folder, copy a newly generated pairing token from VS Code and pair again.
+
+## Recent Releases
+
+The README keeps only the four most recent release highlights. See the full [CHANGELOG](CHANGELOG.md) or [GitHub Releases](https://github.com/towishy/owen-extension/releases) for complete history and downloadable assets.
+
+### 0.1.26
+
+- Added expiring command queues, lifecycle health metrics, screenshot redaction, and observable action-effect policies.
+- Added persisted cancellable browser jobs, capture search and retention, compact category tools, and versioned scenario templates.
+- Expanded `runtimeSnapshot` with navigation timing, paint, LCP, CLS, and long-task metrics.
+
+### 0.1.25
+
+- Changed the browser extension into a passive paired agent controlled from VS Code after one-time setup.
+- Added near-immediate long-poll command delivery with a browser alarm recovery fallback.
+
+### 0.1.24
+
+- Added reusable generic and Microsoft Security scenario templates through `runScenarioTemplate`.
+- Added request-level custom template registries and parameter substitution.
+
+### 0.1.23
+
+- Added tab role orchestration, unexpected popup guards, role-based tab return, and tab-run summaries.
 
 ## Pairing Setup
 
