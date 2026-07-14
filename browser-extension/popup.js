@@ -16,6 +16,9 @@ const elements = {
   includeHtml: document.getElementById('includeHtml'),
   includeScreenshot: document.getElementById('includeScreenshot'),
   screenshotRedaction: document.getElementById('screenshotRedaction'),
+  agentId: document.getElementById('agentId'),
+  connectionStatus: document.getElementById('connectionStatus'),
+  grantSite: document.getElementById('grantSite'),
   save: document.getElementById('save'),
   status: document.getElementById('status')
 };
@@ -27,10 +30,21 @@ elements.save.addEventListener('click', async () => {
   setStatus('Passive');
 });
 
+elements.grantSite.addEventListener('click', async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || !/^https?:/i.test(tab.url)) {
+    setStatus('Open an HTTP(S) page first');
+    return;
+  }
+  const origin = `${new URL(tab.url).origin}/*`;
+  const granted = await chrome.permissions.request({ origins: [origin] });
+  setStatus(granted ? 'Site access granted' : 'Site access denied');
+});
+
 async function loadOptions() {
   const [syncedOptions, localSecrets] = await Promise.all([
     chrome.storage.sync.get(DEFAULT_OPTIONS),
-    chrome.storage.local.get('token')
+    chrome.storage.local.get(['token', 'owenBrowserAgentId', 'owenBridgeConnectionStatus'])
   ]);
   const token = localSecrets.token || syncedOptions.token || '';
   if (!localSecrets.token && syncedOptions.token) {
@@ -45,6 +59,11 @@ async function loadOptions() {
   elements.includeHtml.checked = options.includeHtml;
   elements.includeScreenshot.checked = options.includeScreenshot;
   elements.screenshotRedaction.value = options.screenshotRedaction;
+  elements.agentId.textContent = localSecrets.owenBrowserAgentId || 'Created after polling starts';
+  const connection = localSecrets.owenBridgeConnectionStatus;
+  elements.connectionStatus.textContent = connection?.ok
+    ? `Connected · protocol ${connection.protocolVersion}`
+    : connection?.error || 'Waiting for VS Code';
 }
 
 async function saveOptions() {

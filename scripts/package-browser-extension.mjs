@@ -1,4 +1,5 @@
 import AdmZip from 'adm-zip';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,7 @@ const checkOnly = process.argv.includes('--check');
 
 const requiredFiles = [
   'manifest.json',
+  'protocol-runtime.js',
   'background.js',
   'popup.html',
   'popup.js',
@@ -55,6 +57,12 @@ function validateBrowserExtension() {
   }
   if (!Array.isArray(manifest.permissions) || !manifest.permissions.includes('storage')) {
     throw new Error('browser-extension manifest must include storage permission');
+  }
+  for (const file of ['protocol-runtime.js', 'background.js', 'popup.js']) {
+    const result = spawnSync(process.execPath, ['--check', join(browserDir, file)], { stdio: 'inherit' });
+    if (result.status !== 0) {
+      throw new Error(`Browser extension syntax check failed: ${file}`);
+    }
   }
 }
 

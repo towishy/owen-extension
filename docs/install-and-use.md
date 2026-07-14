@@ -12,7 +12,7 @@ Use this section for a different Windows PC or a Mac.
 ### Install both extensions from GitHub Release
 
 1. Open <https://github.com/towishy/owen-extension/releases>.
-2. Download `owen-browser-bridge-*.vsix` and `owen-browser-capture-browser-extension-*.zip` from **Assets**.
+2. Download `owen-browser-bridge-*.vsix`, `owen-browser-capture-browser-extension-*.zip`, and `SHA256SUMS.txt` from **Assets**.
 3. In VS Code, press `Ctrl+Shift+P` on Windows/Linux or `Cmd+Shift+P` on macOS.
 4. Run `Extensions: Install from VSIX...`.
 5. Select the downloaded `.vsix` file.
@@ -114,7 +114,8 @@ The local server listens on `http://127.0.0.1:17321` by default.
 9. Optionally enter an **Investigation / Case** name such as `incident-12345` when you plan to capture several tabs for the same investigation.
 10. Keep **Accept Copilot browser actions** enabled if you want Copilot to control the paired browser on allowed hosts.
 11. Select whether to include **screenshot** and **HTML snapshot**.
-12. Click **Save Settings**.
+12. Open the target HTTPS page and click **Grant current site access** in the popup.
+13. Click **Save Settings**.
 
 If you need to rotate the token, click **Regenerate and Copy Token** on the setup page, then paste the new token into the browser extension and click **Save Settings** again.
 
@@ -126,18 +127,24 @@ If you need to rotate the token, click **Regenerate and Copy Token** on the setu
 
 After pairing, the browser extension is passive. The popup does not need to stay open, and each tab does not need to be sent manually.
 
+The popup shows a stable browser agent id and bridge connection status. If only one agent is active, routing is automatic. If multiple Edge/Chrome agents are active, pass `targetAgentId` to `#browserAct` or set `owenBrowserBridge.preferredAgentId` in VS Code settings.
+
 The capture is stored under the folder shown in **Capture Directory** on the setup page. By default, this is:
 
 ```text
 raw/browser-captures/<host>/<group>/
   _index.json
   _summary.md
+  _integrity/
+    capture-*.json
   capture-*.json
   capture-*.md
   capture-*.png
 ```
 
 The `<host>` folder comes from the captured page hostname. The `<group>` folder uses **Investigation / Case** when provided, otherwise the extension tries to infer an incident or alert id from the URL and falls back to the capture date.
+
+The VS Code Explorer includes a **Browser Captures** view grouped by host and investigation. Use its toolbar to refresh the catalog or show total storage usage. A capture context menu opens or deletes that capture after confirmation. Each `_integrity/<capture-id>.json` records SHA-256 and byte size for the redacted capture artifacts.
 
 ## 6. Ask Copilot to Analyze It
 
@@ -228,6 +235,8 @@ By default, the VS Code extension accepts captures only from:
 
 Use **Allowed Hosts** on `Owen Browser Bridge: Open Setup Page` to add, edit, or remove accepted domains. Exact hosts, full URLs, and wildcards such as `*.microsoft.com` are supported. Click **Allow All Domains** to accept captures and Copilot browser actions from any host, or **Restore Microsoft Defaults** to return to the default Microsoft security/admin portal list.
 
+Browser site access is a separate permission layer. The manifest permanently permits only `127.0.0.1` and `localhost`; while the target page is active, use **Grant current site access** in the browser popup for that origin.
+
 You can also update `owenBrowserBridge.allowedHosts` directly in VS Code settings. Set it to an empty array only for a controlled local test.
 
 Example:
@@ -274,6 +283,14 @@ Settings JSON example:
 ### `#browserAct` reports `host_not_allowed`
 
 Open `Owen Browser Bridge: Open Setup Page` and add that page's hostname under **Allowed Hosts**. For Microsoft subdomains, `*.microsoft.com` covers hosts such as `security.microsoft.com` and `learn.microsoft.com`.
+
+### `#browserAct` reports `HOST_PERMISSION_REQUIRED`
+
+Open the target page, open the Owen Browser Bridge Agent popup, and click **Grant current site access**. Browser permission and VS Code Allowed Hosts must both permit the page.
+
+### Multiple browser agents are active
+
+Copy the required agent id from its browser popup and add `"targetAgentId": "agent-..."` to the action. For a stable default, set `owenBrowserBridge.preferredAgentId` to that id.
 
 ### `#browserAct` reports `unauthorized`
 
@@ -345,11 +362,12 @@ If you only want validation/package checks without local install, run:
 npm run release:check
 ```
 
-This command verifies the browser extension manifest, compiles and lints the VS Code extension, builds the VSIX, builds the browser extension ZIP, and checks both release assets:
+This command verifies protocol 3.0, the 82-action registry, browser JavaScript syntax, the HTTP lease/ACK/result flow, both packages, and their checksums:
 
 - `dist/owen-browser-bridge-<version>.vsix`
 - `dist/owen-browser-capture-browser-extension-<version>.zip`
+- `dist/SHA256SUMS.txt`
 
-Attach both files to the GitHub Release. The VSIX installs the VS Code side, and the ZIP is extracted and loaded as the unpacked Chrome/Edge browser extension.
+Attach all three files to the GitHub Release. The VSIX installs the VS Code side, and the ZIP is extracted and loaded as the unpacked Chrome/Edge browser extension.
 
-Pushing a `v*` tag also triggers `.github/workflows/release.yml`, which runs the same release check and uploads both assets automatically.
+Pushing a `v*` tag also triggers `.github/workflows/release.yml`. After the current release and all three assets are created successfully, the workflow removes every older GitHub Release and remote tag and verifies that exactly the current release and tag remain.

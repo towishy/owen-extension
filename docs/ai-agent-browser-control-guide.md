@@ -17,7 +17,8 @@ Before calling browser-control actions, confirm these conditions:
 3. The browser extension has the current pairing token.
 4. **Accept Copilot browser actions** is enabled in the browser extension popup.
 5. The active tab host is allowed by `owenBrowserBridge.allowedHosts`.
-6. The user is signed in manually when a portal requires authentication.
+6. The browser popup has been granted current-site access for the active origin.
+7. The user is signed in manually when a portal requires authentication.
 
 After this one-time setup, the browser extension is passive. The agent starts capture, inspection, navigation, and guarded downloads from VS Code; the operator does not open the popup or click a manual tab-send button for each page.
 
@@ -78,6 +79,8 @@ Example body:
 
 The `/commands/enqueue` response includes the queued command and completion result. Browser actions are executed by the paired browser extension through near-immediate long polling, with a 30-second alarm fallback if the MV3 service worker is suspended.
 
+Protocol 3.0 leases each command to one stable browser agent id. The browser ACKs the lease before execution and persists results in an outbox until the VS Code bridge accepts them. Duplicate delivery from a lost HTTP response is idempotent. When multiple agents are active, include `"targetAgentId": "agent-..."` or configure `owenBrowserBridge.preferredAgentId`; ambiguous routing fails instead of selecting a browser silently.
+
 Do not ask the user to paste the pairing token into chat. If a token is required and not already available to the calling environment, ask the user to enter it directly in the browser extension or VS Code setup UI.
 
 ## Core Action Pattern
@@ -87,6 +90,7 @@ Use this shape for most calls:
 ```json
 {
   "action": "<actionName>",
+  "targetAgentId": "<optional-stable-agent-id>",
   "captureAfter": true,
   "includeScreenshot": true,
   "investigationName": "<case-or-task-name>",
@@ -491,6 +495,8 @@ A successful call returns a command object plus completion data. Agents should i
 
 If a capture is stored, prefer analyzing the Markdown plus adjacent JSON. Use screenshot paths for visual confirmation when needed.
 
+`completion.storedCapture.integrityPath` points to the SHA-256 manifest for the redacted JSON, Markdown, and optional PNG artifacts. Use it when evidence integrity or handoff verification matters. Captures are also available in the VS Code **Browser Captures** Explorer grouped by host and investigation.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -498,6 +504,8 @@ If a capture is stored, prefer analyzing the Markdown plus adjacent JSON. Use sc
 | Tool is unavailable | Tool name differs by host | Try `#browserAct`, `#browser_act`, or inspect available tools |
 | `unauthorized` | Pairing token mismatch | Copy token from VS Code setup page and paste into browser extension |
 | `host_not_allowed` | URL host not in allowed list | Add host in setup page or VS Code settings |
+| `HOST_PERMISSION_REQUIRED` | Browser origin permission was not granted | User opens the target page and clicks **Grant current site access** in the browser popup |
+| Multiple browser agents | More than one active agent and no target selected | Pass `targetAgentId` or set `owenBrowserBridge.preferredAgentId` |
 | Command times out | Browser extension polling disabled or tab hung | Enable browser actions, reload extension, retry with larger `timeoutMs` |
 | `AUTH_REQUIRED` | Portal redirected to sign-in | User completes sign-in, then call `resumeAfterAuth` |
 | `REVIEW_REQUIRED` | Manual gate not approved | Re-run with the expected `approvalKeyword` in `value` after operator approval |

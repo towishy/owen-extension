@@ -3,7 +3,10 @@ import { promises as fs } from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { BRIDGE_PROTOCOL_VERSION, BrowserAgentRegistry, requireCompatibleProtocol } from './bridge-protocol';
 import { BROWSER_ACTIONS, getBrowserActionDefinition, type BrowserAction, type BrowserActionCategory } from './browser-actions';
+import { BrowserCapturesTreeProvider, type CaptureExplorerEntry } from './capture-explorer';
+import { writeCaptureIntegrityManifest } from './capture-integrity';
 import { ExpiringCommandQueue } from './command-queue';
 import { isAllowedHost, normalizeAllowedHost } from './host-policy';
 import { redactSensitiveText, type RedactionProfile } from './redaction';
@@ -57,6 +60,7 @@ type StoredCapture = {
 	jsonPath: string;
 	markdownPath: string;
 	screenshotPath?: string;
+	integrityPath?: string;
 	url?: string;
 	title?: string;
 	collectedAt: string;
@@ -98,6 +102,7 @@ type BrowserWaitCondition = {
 
 type BrowserStepInput = {
 	action?: BrowserAction;
+	targetAgentId?: string;
 	selector?: string;
 	text?: string;
 	value?: string;
@@ -214,6 +219,7 @@ type BrowserActInput = BrowserStepInput & {
 
 type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'captureAfter' | 'includeScreenshot' | 'includeHtml'>> & {
 	id: string;
+	targetAgentId?: string;
 	createdAt: string;
 	expiresAt: string;
 	selector?: string;
@@ -322,6 +328,7 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 
 type BrowserCommandResult = {
 	id?: string;
+	agentId?: string;
 	ok?: boolean;
 	result?: unknown;
 	error?: string;
@@ -350,12 +357,14 @@ type ReviewRequiredResult = {
 let server: http.Server | undefined;
 let output: vscode.OutputChannel;
 let setupPanel: vscode.WebviewPanel | undefined;
+let captureExplorer: BrowserCapturesTreeProvider | undefined;
 const browserCommandQueue = new ExpiringCommandQueue<BrowserCommand>(50);
 const browserCommandWaiters = new Map<string, { resolve: (value: BrowserCommandCompletion) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }>();
+const completedBrowserCommands = new Map<string, { agentId: string; completion: BrowserCommandCompletion }>();
 const browserCommandAvailabilityWaiters = new Set<() => void>();
-const BRIDGE_PROTOCOL_VERSION = '2.0';
+const browserAgents = new BrowserAgentRegistry();
 const bridgeStartedAt = new Date().toISOString();
-const commandMetrics = { queued: 0, delivered: 0, completed: 0, failed: 0, timedOut: 0, lateResults: 0 };
+const commandMetrics = { queued: 0, delivered: 0, redelivered: 0, acknowledged: 0, completed: 0, failed: 0, timedOut: 0, lateResults: 0, protocolMismatches: 0 };
 const DEFAULT_ALLOWED_HOSTS = [
 	'security.microsoft.com',
 	'security.microsoft365.com',
@@ -367,6 +376,8 @@ const DEFAULT_ALLOWED_HOSTS = [
 export async function activate(context: vscode.ExtensionContext) {
 	output = vscode.window.createOutputChannel('Owen Browser Bridge');
 	context.subscriptions.push(output);
+	captureExplorer = new BrowserCapturesTreeProvider(() => loadExplorerCaptures(context));
+	context.subscriptions.push(vscode.window.registerTreeDataProvider('owenBrowserBridge.captures', captureExplorer));
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('owen-browser-bridge.openSetupPage', async () => openSetupPage(context)),
@@ -377,6 +388,10 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('owen-browser-bridge.openCapturesFolder', async () => openCapturesFolder(context)),
 		vscode.commands.registerCommand('owen-browser-bridge.copyPairingToken', async () => copyPairingToken(context)),
 		vscode.commands.registerCommand('owen-browser-bridge.regeneratePairingToken', async () => regeneratePairingToken(context)),
+		vscode.commands.registerCommand('owen-browser-bridge.refreshCaptures', () => captureExplorer?.refresh()),
+		vscode.commands.registerCommand('owen-browser-bridge.openCapture', async (capture: CaptureExplorerEntry) => vscode.commands.executeCommand('vscode.open', vscode.Uri.file(capture.markdownPath))),
+		vscode.commands.registerCommand('owen-browser-bridge.deleteCapture', async (capture: CaptureExplorerEntry) => deleteExplorerCapture(context, capture)),
+		vscode.commands.registerCommand('owen-browser-bridge.showCaptureStorageStatus', async () => showCaptureStorageStatus(context)),
 		vscode.lm.registerTool('get_latest_browser_capture', createLatestCaptureTool(context)),
 		vscode.lm.registerTool('get_browser_state', createBrowserStateTool(context)),
 		vscode.lm.registerTool('read_browser_capture', createReadCaptureTool(context)),
@@ -404,7 +419,10 @@ async function startServer(context: vscode.ExtensionContext, notify: boolean) {
 	}
 
 	await ensurePairingToken(context);
-	const port = getConfig().get<number>('port', 17321);
+	const testPort = Number(process.env.OWEN_BROWSER_BRIDGE_TEST_PORT);
+	const port = Number.isInteger(testPort) && testPort >= 1024 && testPort <= 65535
+		? testPort
+		: getConfig().get<number>('port', 17321);
 
 	server = http.createServer(async (request, response) => {
 		try {
@@ -415,10 +433,15 @@ async function startServer(context: vscode.ExtensionContext, notify: boolean) {
 		}
 	});
 
-	await new Promise<void>((resolve, reject) => {
-		server?.once('error', reject);
-		server?.listen(port, '127.0.0.1', () => resolve());
-	});
+	try {
+		await new Promise<void>((resolve, reject) => {
+			server?.once('error', reject);
+			server?.listen(port, '127.0.0.1', () => resolve());
+		});
+	} catch (error) {
+		server = undefined;
+		throw error;
+	}
 
 	output.appendLine(`Listening on http://127.0.0.1:${port}`);
 	if (notify) {
@@ -461,7 +484,9 @@ async function handleRequest(context: vscode.ExtensionContext, request: http.Inc
 			extensionVersion: context.extension.packageJSON.version,
 			startedAt: bridgeStartedAt,
 			queueDepth: browserCommandQueue.length,
+			leasedCommands: browserCommandQueue.leasedCount,
 			pendingResults: browserCommandWaiters.size,
+			activeAgents: browserAgents.listActive(),
 			metrics: commandMetrics
 		});
 		return;
@@ -474,19 +499,58 @@ async function handleRequest(context: vscode.ExtensionContext, request: http.Inc
 		}
 
 		const requestUrl = new URL(request.url, 'http://127.0.0.1');
+		try {
+			requireCompatibleProtocol(requestUrl.searchParams.get('protocolVersion'));
+		} catch (error) {
+			commandMetrics.protocolMismatches += 1;
+			writeJson(response, 409, { error: 'protocol_mismatch', expected: BRIDGE_PROTOCOL_VERSION, message: String(error instanceof Error ? error.message : error) });
+			return;
+		}
+		const agentId = requestUrl.searchParams.get('agentId')?.trim();
+		if (!agentId) {
+			writeJson(response, 400, { error: 'agent_id_required' });
+			return;
+		}
+		browserAgents.touch({
+			id: agentId,
+			browserName: requestUrl.searchParams.get('browserName') ?? undefined,
+			browserVersion: requestUrl.searchParams.get('browserVersion') ?? undefined,
+			protocolVersion: BRIDGE_PROTOCOL_VERSION
+		});
 		const waitMs = Math.min(Math.max(Number(requestUrl.searchParams.get('waitMs')) || 0, 0), 25000);
 		if (browserCommandQueue.length === 0 && waitMs > 0) {
 			await waitForBrowserCommand(waitMs);
 		}
-		const command = browserCommandQueue.take() ?? null;
-		if (command) {
+		const lease = browserCommandQueue.lease(agentId, 30000, Date.now(), command => !command.targetAgentId || command.targetAgentId === agentId);
+		const command = lease?.item ?? null;
+		if (lease) {
 			commandMetrics.delivered += 1;
+			if (lease.deliveryAttempt > 1) {
+				commandMetrics.redelivered += 1;
+			}
 		}
 		writeJson(response, 200, {
 			command,
+			lease: lease ? { leasedUntil: new Date(lease.leasedUntil).toISOString(), deliveryAttempt: lease.deliveryAttempt } : undefined,
 			protocolVersion: BRIDGE_PROTOCOL_VERSION,
 			extensionVersion: context.extension.packageJSON.version
 		});
+		return;
+	}
+
+	if (request.url === '/commands/ack' && request.method === 'POST') {
+		if (!await isAuthorized(context, request)) {
+			writeJson(response, 401, { error: 'unauthorized' });
+			return;
+		}
+		const acknowledgement = JSON.parse(await readBody(request)) as { id?: string; agentId?: string; leaseMs?: number };
+		const leaseMs = Math.min(Math.max(Number(acknowledgement.leaseMs) || 120000, 30000), 600000);
+		if (!acknowledgement.id || !acknowledgement.agentId || !browserCommandQueue.acknowledge(acknowledgement.id, acknowledgement.agentId, leaseMs)) {
+			writeJson(response, 409, { error: 'command_lease_not_owned' });
+			return;
+		}
+		commandMetrics.acknowledged += 1;
+		writeJson(response, 200, { ok: true });
 		return;
 	}
 
@@ -496,8 +560,16 @@ async function handleRequest(context: vscode.ExtensionContext, request: http.Inc
 			return;
 		}
 
-		const completion = await completeBrowserCommand(context, JSON.parse(await readBody(request)) as BrowserCommandResult);
-		writeJson(response, 200, { ok: true, storedCapture: completion.storedCapture });
+		try {
+			const completion = await completeBrowserCommand(context, JSON.parse(await readBody(request)) as BrowserCommandResult);
+			writeJson(response, 200, { ok: true, storedCapture: completion.storedCapture });
+		} catch (error) {
+			if (error instanceof BrowserCommandResultError) {
+				writeJson(response, error.statusCode, { error: error.code, discardResult: error.discardResult, message: error.message });
+				return;
+			}
+			throw error;
+		}
 		return;
 	}
 
@@ -562,6 +634,7 @@ async function storeCapture(context: vscode.ExtensionContext, payload: BrowserCa
 
 	await fs.writeFile(jsonPath, JSON.stringify(redactedPayload, null, 2), 'utf8');
 	await fs.writeFile(markdownPath, renderMarkdown(redactedPayload, screenshotPath ? path.basename(screenshotPath) : undefined), 'utf8');
+	const integrity = await writeCaptureIntegrityManifest(id, folder, [jsonPath, markdownPath, ...(screenshotPath ? [screenshotPath] : [])]);
 	const stored = {
 		id,
 		folder,
@@ -570,6 +643,7 @@ async function storeCapture(context: vscode.ExtensionContext, payload: BrowserCa
 		jsonPath,
 		markdownPath,
 		screenshotPath,
+		integrityPath: integrity.manifestPath,
 		url: redactedPayload.page?.url,
 		title: redactedPayload.page?.title,
 		collectedAt
@@ -578,9 +652,86 @@ async function storeCapture(context: vscode.ExtensionContext, payload: BrowserCa
 	await updateCaptureCatalog(baseDir, stored);
 	await applyCaptureRetention(context, baseDir, stored.id);
 	await updateLatestBrowserState(context, redactedPayload.browserSession, stored);
+	captureExplorer?.refresh();
 	output.appendLine(`Stored capture ${id}: ${markdownPath}`);
 
 	return stored;
+}
+
+async function loadExplorerCaptures(context: vscode.ExtensionContext): Promise<CaptureExplorerEntry[]> {
+	const baseDir = await getCaptureBaseDir(context);
+	let captures = await readCaptureCatalog(path.join(baseDir, '_capture-catalog.jsonl'));
+	if (captures.length === 0) {
+		captures = await collectCaptureCatalogFromIndexes(baseDir);
+	}
+	return [...new Map(captures.map(capture => [capture.id, capture])).values()];
+}
+
+async function deleteExplorerCapture(context: vscode.ExtensionContext, capture: CaptureExplorerEntry) {
+	if (!capture?.id) {
+		return;
+	}
+	const confirmed = await vscode.window.showWarningMessage(`Delete browser capture ${capture.id}?`, { modal: true }, 'Delete');
+	if (confirmed !== 'Delete') {
+		return;
+	}
+	const baseDir = await getCaptureBaseDir(context);
+	for (const candidate of [capture.jsonPath, capture.markdownPath, capture.screenshotPath, capture.integrityPath]) {
+		if (candidate && isPathInside(baseDir, candidate)) {
+			await fs.unlink(candidate).catch(() => undefined);
+		}
+	}
+	const catalogPath = path.join(baseDir, '_capture-catalog.jsonl');
+	const kept = (await readCaptureCatalog(catalogPath)).filter(item => item.id !== capture.id);
+	await writeTextFileAtomic(catalogPath, kept.length > 0 ? `${kept.map(item => JSON.stringify(item)).join('\n')}\n` : '');
+	const folder = path.dirname(capture.jsonPath);
+	if (isPathInside(baseDir, folder)) {
+		await updateCaptureGroupFiles(folder);
+	}
+	captureExplorer?.refresh();
+	vscode.window.showInformationMessage(`Deleted browser capture ${capture.id}.`);
+}
+
+async function showCaptureStorageStatus(context: vscode.ExtensionContext) {
+	const baseDir = await getCaptureBaseDir(context);
+	const status = await measureDirectory(baseDir);
+	const message = `Browser captures: ${status.files} file(s), ${formatBytes(status.bytes)} in ${baseDir}`;
+	const action = await vscode.window.showInformationMessage(message, 'Open Folder');
+	if (action === 'Open Folder') {
+		await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(baseDir));
+	}
+}
+
+async function measureDirectory(folder: string): Promise<{ files: number; bytes: number }> {
+	const entries = await fs.readdir(folder, { withFileTypes: true }).catch(() => []);
+	let files = 0;
+	let bytes = 0;
+	for (const entry of entries) {
+		const candidate = path.join(folder, entry.name);
+		if (entry.isDirectory()) {
+			const child = await measureDirectory(candidate);
+			files += child.files;
+			bytes += child.bytes;
+		} else if (entry.isFile()) {
+			files += 1;
+			bytes += await fs.stat(candidate).then(stat => stat.size).catch(() => 0);
+		}
+	}
+	return { files, bytes };
+}
+
+function formatBytes(bytes: number) {
+	if (bytes < 1024) {
+		return `${bytes} B`;
+	}
+	const units = ['KB', 'MB', 'GB', 'TB'];
+	let value = bytes / 1024;
+	let unit = units[0];
+	for (let index = 1; index < units.length && value >= 1024; index += 1) {
+		value /= 1024;
+		unit = units[index];
+	}
+	return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
 }
 
 async function showLatestCapture(context: vscode.ExtensionContext) {
@@ -745,9 +896,10 @@ function createCategorizedBrowserTool(context: vscode.ExtensionContext, category
 
 async function invokeBrowserAction(context: vscode.ExtensionContext, input: BrowserActInput) {
 	const resumeRequested = (input.action as BrowserAction | undefined) === 'resumeAfterAuth';
+	const targetAgentId = browserAgents.resolveTarget(input.targetAgentId, getConfig().get<string>('preferredAgentId'));
 	const command = resumeRequested
-		? createResumeBrowserCommand(context)
-		: createBrowserCommand(input);
+		? createResumeBrowserCommand(context, targetAgentId)
+		: createBrowserCommand(input, targetAgentId);
 	const completion = await enqueueBrowserCommand(command);
 	const authRequired = parseAuthRequiredResult(completion.result);
 	if (authRequired?.authRequired && authRequired.resumeInput) {
@@ -761,7 +913,7 @@ const SUPPORTED_BROWSER_ACTIONS: readonly BrowserAction[] = BROWSER_ACTIONS;
 
 const DESTRUCTIVE_BROWSER_ACTIONS: BrowserAction[] = ['closeTab'];
 
-function createBrowserCommand(input: BrowserActInput): BrowserCommand {
+function createBrowserCommand(input: BrowserActInput, targetAgentId?: string): BrowserCommand {
 	const action = (input.action ?? 'readPage') as BrowserAction;
 	const timeoutMs = clampTimeout(input.timeoutMs);
 	const createdAt = new Date();
@@ -793,6 +945,7 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 
 	return {
 		id: `command-${formatTimestamp(createdAt.toISOString())}-${crypto.randomBytes(3).toString('hex')}`,
+		targetAgentId,
 		action,
 		createdAt: createdAt.toISOString(),
 		expiresAt: new Date(createdAt.getTime() + timeoutMs + 35000).toISOString(),
@@ -1303,14 +1456,23 @@ function waitForBrowserCommand(waitMs: number) {
 
 async function completeBrowserCommand(context: vscode.ExtensionContext, completion: BrowserCommandResult): Promise<BrowserCommandCompletion> {
 	if (!completion.id) {
-		throw new Error('Browser command result is missing id.');
+		throw new BrowserCommandResultError(400, 'command_result_id_required', true, 'Browser command result is missing id.');
+	}
+	const completed = completedBrowserCommands.get(completion.id);
+	if (completed) {
+		if (completion.agentId === completed.agentId) {
+			return completed.completion;
+		}
+		throw new BrowserCommandResultError(409, 'command_result_agent_mismatch', true, `Browser command result was already completed by another agent: ${completion.id}`);
+	}
+	if (!completion.agentId || !browserCommandQueue.isLeaseOwner(completion.id, completion.agentId)) {
+		throw new BrowserCommandResultError(409, 'command_lease_not_owned', true, `Browser command result does not own the active lease: ${completion.id}`);
 	}
 
 	const waiter = browserCommandWaiters.get(completion.id);
 	if (!waiter) {
 		commandMetrics.lateResults += 1;
-		await appendBrowserActionLog(context, completion.id, completion, undefined);
-		return completion;
+		throw new BrowserCommandResultError(410, 'command_result_expired', true, `Browser command result is no longer expected: ${completion.id}`);
 	}
 
 	let storedCapture: StoredCapture | undefined;
@@ -1327,6 +1489,11 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 	});
 	clearTimeout(waiter.timeout);
 	browserCommandWaiters.delete(completion.id);
+	browserCommandQueue.complete(completion.id, completion.agentId);
+	completedBrowserCommands.set(completion.id, { agentId: completion.agentId, completion: result });
+	while (completedBrowserCommands.size > 200) {
+		completedBrowserCommands.delete(completedBrowserCommands.keys().next().value as string);
+	}
 	if (completion.ok === false && completion.error !== 'AUTH_REQUIRED' && completion.error !== 'REVIEW_REQUIRED') {
 		commandMetrics.failed += 1;
 		waiter.reject(new Error(completion.error ?? `Browser command failed: ${completion.id}`));
@@ -1336,6 +1503,18 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 	}
 
 	return result;
+}
+
+class BrowserCommandResultError extends Error {
+	constructor(
+		readonly statusCode: number,
+		readonly code: string,
+		readonly discardResult: boolean,
+		message: string
+	) {
+		super(message);
+		this.name = 'BrowserCommandResultError';
+	}
 }
 
 async function writeBrowserCommandArtifacts(context: vscode.ExtensionContext, completion: BrowserCommandCompletion) {
@@ -1684,13 +1863,13 @@ function parseReviewRequiredResult(result: unknown): ReviewRequiredResult | unde
 	return candidate.reviewRequired ? candidate : undefined;
 }
 
-function createResumeBrowserCommand(context: vscode.ExtensionContext): BrowserCommand {
+function createResumeBrowserCommand(context: vscode.ExtensionContext, targetAgentId?: string): BrowserCommand {
 	const resumeInput = context.globalState.get<BrowserActInput>('pendingAuthResumeInput');
 	if (!resumeInput) {
 		throw new Error('No pending auth-resume command exists. Start a browserAct action first.');
 	}
 
-	return createBrowserCommand(resumeInput);
+	return createBrowserCommand(resumeInput, targetAgentId);
 }
 
 async function appendBrowserActionLog(context: vscode.ExtensionContext, commandId: string, completion: BrowserCommandResult, storedCapture: StoredCapture | undefined) {
@@ -1800,6 +1979,8 @@ async function captureFromPaths(id: string, jsonPath: string, markdownPath: stri
 	const payload = JSON.parse(jsonText) as BrowserCapturePayload;
 	const screenshotPath = path.join(path.dirname(jsonPath), `${id}.png`);
 	const hasScreenshot = await fs.stat(screenshotPath).then(() => true).catch(() => false);
+	const integrityPath = path.join(path.dirname(jsonPath), '_integrity', `${id}.json`);
+	const hasIntegrity = await fs.stat(integrityPath).then(() => true).catch(() => false);
 	const pageUrl = parseUrl(payload.page?.url);
 	return {
 		id,
@@ -1809,6 +1990,7 @@ async function captureFromPaths(id: string, jsonPath: string, markdownPath: stri
 		jsonPath,
 		markdownPath,
 		screenshotPath: hasScreenshot ? screenshotPath : undefined,
+		integrityPath: hasIntegrity ? integrityPath : undefined,
 		url: payload.page?.url,
 		title: payload.page?.title,
 		collectedAt: payload.collectedAt ?? new Date().toISOString()
@@ -1819,10 +2001,10 @@ async function findCaptureJson(baseDir: string, id: string): Promise<string> {
 	return findFileRecursive(baseDir, `${id}.json`, `Browser capture not found: ${id}`);
 }
 
-async function updateCaptureGroupFiles(folder: string, latestCapture: StoredCapture) {
+async function updateCaptureGroupFiles(folder: string, latestCapture?: StoredCapture) {
 	const summary = await readCaptureGroup(folder, latestCapture);
-	await fs.writeFile(path.join(folder, '_index.json'), JSON.stringify(summary, null, 2), 'utf8');
-	await fs.writeFile(path.join(folder, '_summary.md'), renderCaptureGroupMarkdown(summary), 'utf8');
+	await writeTextFileAtomic(path.join(folder, '_index.json'), JSON.stringify(summary, null, 2));
+	await writeTextFileAtomic(path.join(folder, '_summary.md'), renderCaptureGroupMarkdown(summary));
 }
 
 async function updateCaptureCatalog(baseDir: string, latestCapture: StoredCapture) {
@@ -1866,7 +2048,7 @@ async function applyCaptureRetention(context: vscode.ExtensionContext, baseDir: 
 
 	const affectedFolders = new Set<string>();
 	for (const capture of removed) {
-		for (const candidate of [capture.jsonPath, capture.markdownPath, capture.screenshotPath]) {
+		for (const candidate of [capture.jsonPath, capture.markdownPath, capture.screenshotPath, capture.integrityPath]) {
 			if (candidate && isPathInside(baseDir, candidate)) {
 				await fs.unlink(candidate).catch(() => undefined);
 			}
@@ -1875,11 +2057,9 @@ async function applyCaptureRetention(context: vscode.ExtensionContext, baseDir: 
 			affectedFolders.add(capture.folder);
 		}
 	}
-	await fs.writeFile(catalogPath, kept.length > 0 ? `${kept.map(item => JSON.stringify(item)).join('\n')}\n` : '', 'utf8');
+	await writeTextFileAtomic(catalogPath, kept.length > 0 ? `${kept.map(item => JSON.stringify(item)).join('\n')}\n` : '');
 	for (const folder of affectedFolders) {
-		const summary = await readCaptureGroup(folder);
-		await fs.writeFile(path.join(folder, '_index.json'), JSON.stringify(summary, null, 2), 'utf8');
-		await fs.writeFile(path.join(folder, '_summary.md'), renderCaptureGroupMarkdown(summary), 'utf8');
+		await updateCaptureGroupFiles(folder);
 	}
 	output.appendLine(`Capture retention removed ${removed.length} capture(s).`);
 }
@@ -1935,13 +2115,25 @@ async function searchCaptureCatalog(context: vscode.ExtensionContext, input: Cap
 
 async function readCaptureCatalog(catalogPath: string) {
 	const text = await fs.readFile(catalogPath, 'utf8').catch(() => '');
-	return text.split(/\r?\n/).filter(Boolean).flatMap(line => {
+	const captures = text.split(/\r?\n/).filter(Boolean).flatMap(line => {
 		try {
 			return [JSON.parse(line) as StoredCapture];
 		} catch {
 			return [];
 		}
 	});
+	return [...new Map(captures.map(capture => [capture.id, capture])).values()];
+}
+
+async function writeTextFileAtomic(filePath: string, content: string) {
+	const temporaryPath = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+	await fs.writeFile(temporaryPath, content, 'utf8');
+	try {
+		await fs.rename(temporaryPath, filePath);
+	} catch (error) {
+		await fs.unlink(temporaryPath).catch(() => undefined);
+		throw error;
+	}
 }
 
 async function collectCaptureCatalogFromIndexes(folder: string): Promise<StoredCapture[]> {

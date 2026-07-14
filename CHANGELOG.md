@@ -6,6 +6,19 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-07-14
+
+- Upgraded the local bridge to protocol 3.0 with command leases, explicit ACK/completion ownership, lease-expiry redelivery, and idempotent result acceptance.
+- Added persistent browser agent identities, multi-agent targeting through `targetAgentId` and `owenBrowserBridge.preferredAgentId`, plus active-agent health data.
+- Added a persisted browser result outbox with timeout, exponential backoff, and discard handling for expired or invalid results.
+- Replaced permanent web-wide host access with optional per-origin permissions and added **Grant current site access** plus agent/connection status to the browser popup.
+- Persisted bounded checkpoints, run history, and recent command failures across MV3 service-worker restarts.
+- Added the Browser Captures Explorer, storage status and confirmed deletion commands, atomic capture index/catalog updates, and SHA-256 integrity manifests.
+- Expanded the action registry with required-input, effect-policy, confirmation, and protocol metadata and added independent schema drift checks.
+- Added protocol-runtime and loopback HTTP integration tests covering authentication, protocol mismatch, routing, ACK ownership, result ownership, and duplicate result delivery.
+- Hardened release packaging with browser JavaScript syntax checks, VSIX test/temp exclusions, `SHA256SUMS.txt`, and required protocol-runtime verification.
+- Changed the release workflow to upload the current assets first, then retain exactly the newest GitHub Release and remote tag.
+
 ## [0.1.26] - 2026-07-14
 
 - Added expiring browser commands, queue size limits, timeout removal, late-result metrics, and protocol/version health metadata.

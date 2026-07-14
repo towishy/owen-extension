@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -63,8 +63,62 @@
       {
         "command": "owen-browser-bridge.regeneratePairingToken",
         "title": "Owen Browser Bridge: Regenerate Pairing Token"
+      },
+      {
+        "command": "owen-browser-bridge.refreshCaptures",
+        "title": "Owen Browser Bridge: Refresh Captures",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "owen-browser-bridge.openCapture",
+        "title": "Owen Browser Bridge: Open Capture"
+      },
+      {
+        "command": "owen-browser-bridge.deleteCapture",
+        "title": "Owen Browser Bridge: Delete Capture",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "owen-browser-bridge.showCaptureStorageStatus",
+        "title": "Owen Browser Bridge: Show Capture Storage Status",
+        "icon": "$(database)"
       }
     ],
+    "views": {
+      "explorer": [
+        {
+          "id": "owenBrowserBridge.captures",
+          "name": "Browser Captures",
+          "icon": "$(browser)"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "owen-browser-bridge.refreshCaptures",
+          "when": "view == owenBrowserBridge.captures",
+          "group": "navigation"
+        },
+        {
+          "command": "owen-browser-bridge.showCaptureStorageStatus",
+          "when": "view == owenBrowserBridge.captures",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "owen-browser-bridge.openCapture",
+          "when": "view == owenBrowserBridge.captures && viewItem == browserCapture",
+          "group": "inline"
+        },
+        {
+          "command": "owen-browser-bridge.deleteCapture",
+          "when": "view == owenBrowserBridge.captures && viewItem == browserCapture",
+          "group": "inline"
+        }
+      ]
+    },
     "languageModelTools": [
       {
         "name": "get_latest_browser_capture",
@@ -166,18 +220,43 @@
         "userDescription": "Searches stored browser captures by text, host, group, and date.",
         "modelDescription": "Use this tool to find prior browser evidence across investigation groups without reading every capture. It searches the local capture catalog by title, URL, host, group, id, and collected date.",
         "toolReferenceName": "searchBrowserCaptures",
-        "tags": ["browser", "capture", "search", "investigation"],
+        "tags": [
+          "browser",
+          "capture",
+          "search",
+          "investigation"
+        ],
         "icon": "$(search)",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
           "properties": {
-            "query": { "type": "string", "description": "Text matched against capture id, title, URL, host, and group." },
-            "host": { "type": "string", "description": "Optional exact or partial host filter." },
-            "group": { "type": "string", "description": "Optional exact or partial investigation group filter." },
-            "from": { "type": "string", "description": "Optional inclusive ISO date/time lower bound." },
-            "to": { "type": "string", "description": "Optional inclusive ISO date/time upper bound." },
-            "limit": { "type": "number", "minimum": 1, "maximum": 200, "description": "Maximum results, default 20." }
+            "query": {
+              "type": "string",
+              "description": "Text matched against capture id, title, URL, host, and group."
+            },
+            "host": {
+              "type": "string",
+              "description": "Optional exact or partial host filter."
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional exact or partial investigation group filter."
+            },
+            "from": {
+              "type": "string",
+              "description": "Optional inclusive ISO date/time lower bound."
+            },
+            "to": {
+              "type": "string",
+              "description": "Optional inclusive ISO date/time upper bound."
+            },
+            "limit": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 200,
+              "description": "Maximum results, default 20."
+            }
           },
           "required": []
         }
@@ -188,17 +267,72 @@
         "userDescription": "Runs read-only inspection and readiness actions in the paired browser.",
         "modelDescription": "Prefer this compact tool for page inspection, waits, target discovery, runtime snapshots, safety previews, and readiness checks. Use browser_act for uncommon advanced inputs.",
         "toolReferenceName": "browserRead",
-        "tags": ["browser", "read", "inspect"],
+        "tags": [
+          "browser",
+          "read",
+          "inspect"
+        ],
         "icon": "$(eye)",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
           "properties": {
-            "action": { "type": "string", "enum": ["readPage", "waitForText", "wait", "waitPreset", "hover", "listInteractables", "inspectTargets", "runtimeSnapshot", "exportReplay", "safeDownloadAndHash", "stateCheckpoint", "humanReviewGate", "semanticWait", "policyGuard", "mapForm", "watchPageChanges", "safeActionPreview", "stableTargetProfile", "failureExplainer", "waitProfiler", "automationHealthScore", "sensitiveActionGuard", "popupGuard", "tabRunSummary", "assertPageContract"] },
-            "selector": { "type": "string" }, "text": { "type": "string" }, "targetHint": { "type": "string" },
-            "timeoutMs": { "type": "number" }, "captureAfter": { "type": "boolean" }, "investigationName": { "type": "string" }
+            "action": {
+              "type": "string",
+              "enum": [
+                "readPage",
+                "waitForText",
+                "wait",
+                "waitPreset",
+                "hover",
+                "listInteractables",
+                "inspectTargets",
+                "runtimeSnapshot",
+                "exportReplay",
+                "safeDownloadAndHash",
+                "stateCheckpoint",
+                "humanReviewGate",
+                "semanticWait",
+                "policyGuard",
+                "mapForm",
+                "watchPageChanges",
+                "safeActionPreview",
+                "stableTargetProfile",
+                "failureExplainer",
+                "waitProfiler",
+                "automationHealthScore",
+                "sensitiveActionGuard",
+                "popupGuard",
+                "tabRunSummary",
+                "assertPageContract"
+              ]
+            },
+            "selector": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "targetHint": {
+              "type": "string"
+            },
+            "timeoutMs": {
+              "type": "number"
+            },
+            "captureAfter": {
+              "type": "boolean"
+            },
+            "investigationName": {
+              "type": "string"
+            },
+            "targetAgentId": {
+              "type": "string",
+              "description": "Optional stable browser agent id when multiple paired browsers are active."
+            }
           },
-          "required": ["action"],
+          "required": [
+            "action"
+          ],
           "additionalProperties": true
         }
       },
@@ -208,18 +342,81 @@
         "userDescription": "Runs direct navigation and interaction actions in the paired browser.",
         "modelDescription": "Use for click, type, navigation, scroll, history, tab, form, and rollback actions. effectPolicy=require can reject no-effect interactions.",
         "toolReferenceName": "browserInteract",
-        "tags": ["browser", "interact", "automation"],
+        "tags": [
+          "browser",
+          "interact",
+          "automation"
+        ],
         "icon": "$(cursor)",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
           "properties": {
-            "action": { "type": "string", "enum": ["click", "type", "navigate", "scroll", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "smartFormFill", "rollbackToCheckpoint", "tabOrchestrator", "returnToTab"] },
-            "selector": { "type": "string" }, "text": { "type": "string" }, "value": { "type": "string" }, "url": { "type": "string" },
-            "effectPolicy": { "type": "string", "enum": ["none", "observe", "require"] }, "confirmDangerous": { "type": "boolean" },
-            "acknowledgement": { "type": "string" }, "timeoutMs": { "type": "number" }, "captureAfter": { "type": "boolean" }, "investigationName": { "type": "string" }
+            "action": {
+              "type": "string",
+              "enum": [
+                "click",
+                "type",
+                "navigate",
+                "scroll",
+                "keyPress",
+                "selectOption",
+                "clearInput",
+                "back",
+                "forward",
+                "reload",
+                "openInNewTab",
+                "switchTab",
+                "closeTab",
+                "smartFormFill",
+                "rollbackToCheckpoint",
+                "tabOrchestrator",
+                "returnToTab"
+              ]
+            },
+            "selector": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "effectPolicy": {
+              "type": "string",
+              "enum": [
+                "none",
+                "observe",
+                "require"
+              ]
+            },
+            "confirmDangerous": {
+              "type": "boolean"
+            },
+            "acknowledgement": {
+              "type": "string"
+            },
+            "timeoutMs": {
+              "type": "number"
+            },
+            "captureAfter": {
+              "type": "boolean"
+            },
+            "investigationName": {
+              "type": "string"
+            },
+            "targetAgentId": {
+              "type": "string",
+              "description": "Optional stable browser agent id when multiple paired browsers are active."
+            }
           },
-          "required": ["action"],
+          "required": [
+            "action"
+          ],
           "additionalProperties": true
         }
       },
@@ -229,17 +426,65 @@
         "userDescription": "Runs multi-step and reusable workflows in the paired browser.",
         "modelDescription": "Use for journeys, pagination, conditional and bulk workflows, drilldown, macro replay, scenario execution, auth resume, and runWorkflow.",
         "toolReferenceName": "browserWorkflow",
-        "tags": ["browser", "workflow", "automation"],
+        "tags": [
+          "browser",
+          "workflow",
+          "automation"
+        ],
         "icon": "$(run-all)",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
           "properties": {
-            "action": { "type": "string", "enum": ["journeyCapture", "paginateCapture", "conditionalWorkflow", "multiTabCrawl", "domDiffTimeline", "bulkActionFromList", "planAndRun", "guidedDrilldown", "replayWorkflow", "runScenarioTemplate", "resumeAfterAuth", "runWorkflow"] },
-            "steps": { "type": "array", "items": { "type": "object" } }, "scenarioName": { "type": "string" }, "macroName": { "type": "string" },
-            "params": { "type": "object" }, "timeoutMs": { "type": "number" }, "captureAfter": { "type": "boolean" }, "investigationName": { "type": "string" }
+            "action": {
+              "type": "string",
+              "enum": [
+                "journeyCapture",
+                "paginateCapture",
+                "conditionalWorkflow",
+                "multiTabCrawl",
+                "domDiffTimeline",
+                "bulkActionFromList",
+                "planAndRun",
+                "guidedDrilldown",
+                "replayWorkflow",
+                "runScenarioTemplate",
+                "resumeAfterAuth",
+                "runWorkflow"
+              ]
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "scenarioName": {
+              "type": "string"
+            },
+            "macroName": {
+              "type": "string"
+            },
+            "params": {
+              "type": "object"
+            },
+            "timeoutMs": {
+              "type": "number"
+            },
+            "captureAfter": {
+              "type": "boolean"
+            },
+            "investigationName": {
+              "type": "string"
+            },
+            "targetAgentId": {
+              "type": "string",
+              "description": "Optional stable browser agent id when multiple paired browsers are active."
+            }
           },
-          "required": ["action"],
+          "required": [
+            "action"
+          ],
           "additionalProperties": true
         }
       },
@@ -249,17 +494,68 @@
         "userDescription": "Captures, validates, compares, and packages browser evidence.",
         "modelDescription": "Use for screenshots, OCR hints, network and table evidence, visual assertions, claim checks, evidence packs, navigation graphs, and handoffs.",
         "toolReferenceName": "browserEvidence",
-        "tags": ["browser", "evidence", "capture"],
+        "tags": [
+          "browser",
+          "evidence",
+          "capture"
+        ],
         "icon": "$(verified)",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
           "properties": {
-            "action": { "type": "string", "enum": ["capture", "captureElement", "captureRegion", "ocrSnapshot", "dataGapGuard", "networkTraceCapture", "tableExtract", "compareCaptureRuns", "visualAssert", "accessibilitySnapshot", "highlightEvidence", "evidenceClaimCheck", "tableWatchAndDiff", "browserRunBundle", "evidenceCompletenessCheck", "buildEvidencePack", "buildNavigationGraph", "createHandoff"] },
-            "selector": { "type": "string" }, "captureGroup": { "type": "string" }, "claim": { "type": "string" },
-            "includeScreenshot": { "type": "boolean" }, "captureAfter": { "type": "boolean" }, "investigationName": { "type": "string" }, "timeoutMs": { "type": "number" }
+            "action": {
+              "type": "string",
+              "enum": [
+                "capture",
+                "captureElement",
+                "captureRegion",
+                "ocrSnapshot",
+                "dataGapGuard",
+                "networkTraceCapture",
+                "tableExtract",
+                "compareCaptureRuns",
+                "visualAssert",
+                "accessibilitySnapshot",
+                "highlightEvidence",
+                "evidenceClaimCheck",
+                "tableWatchAndDiff",
+                "browserRunBundle",
+                "evidenceCompletenessCheck",
+                "buildEvidencePack",
+                "buildNavigationGraph",
+                "createHandoff"
+              ]
+            },
+            "selector": {
+              "type": "string"
+            },
+            "captureGroup": {
+              "type": "string"
+            },
+            "claim": {
+              "type": "string"
+            },
+            "includeScreenshot": {
+              "type": "boolean"
+            },
+            "captureAfter": {
+              "type": "boolean"
+            },
+            "investigationName": {
+              "type": "string"
+            },
+            "timeoutMs": {
+              "type": "number"
+            },
+            "targetAgentId": {
+              "type": "string",
+              "description": "Optional stable browser agent id when multiple paired browsers are active."
+            }
           },
-          "required": ["action"],
+          "required": [
+            "action"
+          ],
           "additionalProperties": true
         }
       },
@@ -269,18 +565,67 @@
         "userDescription": "Manages jobs, macros, templates, selector health, and review queues.",
         "modelDescription": "Use for browser job lifecycle, macro recording, persisted scenario template management, selector health reports, and capture review queues.",
         "toolReferenceName": "browserAdmin",
-        "tags": ["browser", "admin", "jobs", "templates"],
+        "tags": [
+          "browser",
+          "admin",
+          "jobs",
+          "templates"
+        ],
         "icon": "$(settings-gear)",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
           "properties": {
-            "action": { "type": "string", "enum": ["selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "listScenarioTemplates", "saveScenarioTemplate", "deleteScenarioTemplate", "exportScenarioTemplates"] },
-            "jobName": { "type": "string" }, "macroName": { "type": "string" }, "scenarioName": { "type": "string" },
-            "steps": { "type": "array", "items": { "type": "object" } }, "scenarioTemplates": { "type": "object" }, "templateVersion": { "type": "string" },
-            "maxEntries": { "type": "number" }, "captureAfter": { "type": "boolean" }
+            "action": {
+              "type": "string",
+              "enum": [
+                "selectorHealthReport",
+                "captureReviewQueue",
+                "startBrowserJob",
+                "getBrowserJob",
+                "cancelBrowserJob",
+                "recordWorkflow",
+                "listScenarioTemplates",
+                "saveScenarioTemplate",
+                "deleteScenarioTemplate",
+                "exportScenarioTemplates"
+              ]
+            },
+            "jobName": {
+              "type": "string"
+            },
+            "macroName": {
+              "type": "string"
+            },
+            "scenarioName": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "scenarioTemplates": {
+              "type": "object"
+            },
+            "templateVersion": {
+              "type": "string"
+            },
+            "maxEntries": {
+              "type": "number"
+            },
+            "captureAfter": {
+              "type": "boolean"
+            },
+            "targetAgentId": {
+              "type": "string",
+              "description": "Optional stable browser agent id when multiple paired browsers are active."
+            }
           },
-          "required": ["action"],
+          "required": [
+            "action"
+          ],
           "additionalProperties": true
         }
       },
@@ -304,8 +649,95 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "waitPreset", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "visualAssert", "accessibilitySnapshot", "mapForm", "watchPageChanges", "highlightEvidence", "planAndRun", "evidenceClaimCheck", "tableWatchAndDiff", "browserRunBundle", "safeActionPreview", "stableTargetProfile", "guidedDrilldown", "evidenceCompletenessCheck", "failureExplainer", "waitProfiler", "automationHealthScore", "sensitiveActionGuard", "tabOrchestrator", "popupGuard", "returnToTab", "tabRunSummary", "buildEvidencePack", "buildNavigationGraph", "assertPageContract", "createHandoff", "selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "replayWorkflow", "listScenarioTemplates", "saveScenarioTemplate", "deleteScenarioTemplate", "exportScenarioTemplates", "runScenarioTemplate", "resumeAfterAuth", "runWorkflow"],
+              "enum": [
+                "readPage",
+                "capture",
+                "click",
+                "type",
+                "navigate",
+                "waitForText",
+                "wait",
+                "waitPreset",
+                "scroll",
+                "hover",
+                "keyPress",
+                "selectOption",
+                "clearInput",
+                "back",
+                "forward",
+                "reload",
+                "openInNewTab",
+                "switchTab",
+                "closeTab",
+                "listInteractables",
+                "inspectTargets",
+                "captureElement",
+                "captureRegion",
+                "journeyCapture",
+                "paginateCapture",
+                "smartFormFill",
+                "conditionalWorkflow",
+                "multiTabCrawl",
+                "runtimeSnapshot",
+                "domDiffTimeline",
+                "ocrSnapshot",
+                "dataGapGuard",
+                "exportReplay",
+                "networkTraceCapture",
+                "safeDownloadAndHash",
+                "tableExtract",
+                "stateCheckpoint",
+                "rollbackToCheckpoint",
+                "humanReviewGate",
+                "bulkActionFromList",
+                "semanticWait",
+                "compareCaptureRuns",
+                "policyGuard",
+                "visualAssert",
+                "accessibilitySnapshot",
+                "mapForm",
+                "watchPageChanges",
+                "highlightEvidence",
+                "planAndRun",
+                "evidenceClaimCheck",
+                "tableWatchAndDiff",
+                "browserRunBundle",
+                "safeActionPreview",
+                "stableTargetProfile",
+                "guidedDrilldown",
+                "evidenceCompletenessCheck",
+                "failureExplainer",
+                "waitProfiler",
+                "automationHealthScore",
+                "sensitiveActionGuard",
+                "tabOrchestrator",
+                "popupGuard",
+                "returnToTab",
+                "tabRunSummary",
+                "buildEvidencePack",
+                "buildNavigationGraph",
+                "assertPageContract",
+                "createHandoff",
+                "selectorHealthReport",
+                "captureReviewQueue",
+                "startBrowserJob",
+                "getBrowserJob",
+                "cancelBrowserJob",
+                "recordWorkflow",
+                "replayWorkflow",
+                "listScenarioTemplates",
+                "saveScenarioTemplate",
+                "deleteScenarioTemplate",
+                "exportScenarioTemplates",
+                "runScenarioTemplate",
+                "resumeAfterAuth",
+                "runWorkflow"
+              ],
               "description": "Browser action to run. Defaults to readPage."
+            },
+            "targetAgentId": {
+              "type": "string",
+              "description": "Specific active browser agent id. Required when multiple Edge/Chrome agents are connected unless owenBrowserBridge.preferredAgentId is set."
             },
             "selector": {
               "type": "string",
@@ -325,12 +757,16 @@
             },
             "urls": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "URL list for journeyCapture. Copilot can navigate each URL and collect per-page summaries."
             },
             "formFields": {
               "type": "object",
-              "additionalProperties": { "type": "string" },
+              "additionalProperties": {
+                "type": "string"
+              },
               "description": "Field name to value map for smartFormFill."
             },
             "submitSelector": {
@@ -344,7 +780,9 @@
             "conditions": {
               "type": "array",
               "description": "Conditional branches for conditionalWorkflow. Each item supports if/then/else steps.",
-              "items": { "type": "object" }
+              "items": {
+                "type": "object"
+              }
             },
             "linkSelector": {
               "type": "string",
@@ -380,12 +818,16 @@
             },
             "requiredFields": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Required extracted field names for dataGapGuard."
             },
             "requiredTexts": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Required visible-text snippets for dataGapGuard."
             },
             "acknowledgement": {
@@ -402,7 +844,9 @@
             },
             "extractSelectors": {
               "type": "object",
-              "additionalProperties": { "type": "string" },
+              "additionalProperties": {
+                "type": "string"
+              },
               "description": "Named selector map for structured extraction. Example: { incidentId: '#id', severity: '[data-test=severity]' }."
             },
             "waitAfterNavigateMs": {
@@ -411,7 +855,10 @@
             },
             "direction": {
               "type": "string",
-              "enum": ["up", "down"],
+              "enum": [
+                "up",
+                "down"
+              ],
               "description": "Scroll direction for scroll actions."
             },
             "delta": {
@@ -420,7 +867,9 @@
             },
             "options": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Option values or labels for selectOption actions."
             },
             "timeoutMs": {
@@ -433,12 +882,16 @@
             },
             "fallbackSelectors": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Alternative selectors used when the primary target fails."
             },
             "fallbackTexts": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Alternative visible text labels used when the primary target fails."
             },
             "autoHeal": {
@@ -447,7 +900,12 @@
             },
             "targetScope": {
               "type": "string",
-              "enum": ["auto", "main", "allFrames", "shadowDeep"],
+              "enum": [
+                "auto",
+                "main",
+                "allFrames",
+                "shadowDeep"
+              ],
               "description": "Target lookup scope. auto traverses shadow roots and same-origin iframes when possible."
             },
             "frameDepth": {
@@ -456,7 +914,11 @@
             },
             "retryProfile": {
               "type": "string",
-              "enum": ["conservative", "standard", "aggressive"],
+              "enum": [
+                "conservative",
+                "standard",
+                "aggressive"
+              ],
               "description": "Preset retry behavior profile when retries is omitted."
             },
             "captureBeforeAfter": {
@@ -465,7 +927,11 @@
             },
             "effectPolicy": {
               "type": "string",
-              "enum": ["none", "observe", "require"],
+              "enum": [
+                "none",
+                "observe",
+                "require"
+              ],
               "description": "Observe whether interactive actions changed URL, DOM, scroll, focus, or target state. require fails actions with no observed effect."
             },
             "targetHint": {
@@ -488,7 +954,9 @@
             "scenarioTemplates": {
               "type": "object",
               "description": "Optional custom scenario template registry. Each value can include description, category, defaults, and steps.",
-              "additionalProperties": { "type": "object" }
+              "additionalProperties": {
+                "type": "object"
+              }
             },
             "templateVersion": {
               "type": "string",
@@ -524,7 +992,9 @@
             },
             "highlightSelectors": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Selectors to draw evidence highlight boxes around for highlightEvidence."
             },
             "highlightText": {
@@ -541,17 +1011,23 @@
             },
             "requiredClaims": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Claims or evidence categories required for evidenceCompletenessCheck."
             },
             "keyColumns": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Column names used as stable row keys for tableWatchAndDiff."
             },
             "waitCandidates": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Wait condition names to profile for waitProfiler."
             },
             "detailSelector": {
@@ -560,7 +1036,12 @@
             },
             "waitPreset": {
               "type": "string",
-              "enum": ["defenderIncidentReady", "azureBladeReady", "entraTableReady", "genericPortalReady"],
+              "enum": [
+                "defenderIncidentReady",
+                "azureBladeReady",
+                "entraTableReady",
+                "genericPortalReady"
+              ],
               "description": "Named readiness preset for action=waitPreset."
             },
             "contractName": {
@@ -569,12 +1050,16 @@
             },
             "contractSelectors": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Selectors that must be visible for assertPageContract."
             },
             "contractTexts": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Visible text snippets required by assertPageContract."
             },
             "captureGroup": {
@@ -589,7 +1074,9 @@
               "type": "object",
               "additionalProperties": {
                 "type": "array",
-                "items": { "type": "string" }
+                "items": {
+                  "type": "string"
+                }
               },
               "description": "Role-to-URL/title substring map for tabOrchestrator, popupGuard, returnToTab, and tabRunSummary."
             },
@@ -607,7 +1094,11 @@
             },
             "onUnexpectedTab": {
               "type": "string",
-              "enum": ["capture", "warn", "block"],
+              "enum": [
+                "capture",
+                "warn",
+                "block"
+              ],
               "description": "How tabOrchestrator and popupGuard handle unexpected tabs."
             },
             "regionX": {
@@ -656,7 +1147,9 @@
             },
             "urlIncludes": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "URL substring filters for networkTraceCapture."
             },
             "durationMs": {
@@ -673,12 +1166,19 @@
             },
             "headerMode": {
               "type": "string",
-              "enum": ["auto", "thead", "firstRow"],
+              "enum": [
+                "auto",
+                "thead",
+                "firstRow"
+              ],
               "description": "Header resolution mode for tableExtract."
             },
             "outputFormat": {
               "type": "string",
-              "enum": ["json", "csv"],
+              "enum": [
+                "json",
+                "csv"
+              ],
               "description": "Output format for tableExtract results."
             },
             "checkpointName": {
@@ -711,7 +1211,11 @@
             },
             "matchMode": {
               "type": "string",
-              "enum": ["includes", "equals", "regex"],
+              "enum": [
+                "includes",
+                "equals",
+                "regex"
+              ],
               "description": "Match mode for bulkActionFromList text filtering."
             },
             "actionTemplate": {
@@ -724,7 +1228,9 @@
             },
             "semanticConditions": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Semantic wait expressions for semanticWait, e.g. text:, notText:, selector:, selectorGone:."
             },
             "baseRunId": {
@@ -737,7 +1243,9 @@
             },
             "ignoreSelectors": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Selectors ignored during run comparison reports."
             },
             "policyProfile": {
@@ -746,12 +1254,19 @@
             },
             "onViolation": {
               "type": "string",
-              "enum": ["block", "warn"],
+              "enum": [
+                "block",
+                "warn"
+              ],
               "description": "Violation handling mode for policyGuard."
             },
             "preset": {
               "type": "string",
-              "enum": ["defenderIncidentSurvey", "defenderIncidentAlerts", "defenderIncidentEvidence"],
+              "enum": [
+                "defenderIncidentSurvey",
+                "defenderIncidentAlerts",
+                "defenderIncidentEvidence"
+              ],
               "description": "Named workflow preset for Defender incident navigation."
             },
             "steps": {
@@ -767,26 +1282,56 @@
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": ["text", "element", "elementGone", "urlMatch", "spinnerGone", "elementStable", "urlSettled", "composite", "semantic", "networkIdle", "requestDone"]
+                  "enum": [
+                    "text",
+                    "element",
+                    "elementGone",
+                    "urlMatch",
+                    "spinnerGone",
+                    "elementStable",
+                    "urlSettled",
+                    "composite",
+                    "semantic",
+                    "networkIdle",
+                    "requestDone"
+                  ]
                 },
-                "text": { "type": "string" },
-                "selector": { "type": "string" },
-                "urlPattern": { "type": "string" },
+                "text": {
+                  "type": "string"
+                },
+                "selector": {
+                  "type": "string"
+                },
+                "urlPattern": {
+                  "type": "string"
+                },
                 "urlIncludes": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "statusIn": {
                   "type": "array",
-                  "items": { "type": "number" }
+                  "items": {
+                    "type": "number"
+                  }
                 },
-                "idleMs": { "type": "number" },
-                "maxInflight": { "type": "number" },
+                "idleMs": {
+                  "type": "number"
+                },
+                "maxInflight": {
+                  "type": "number"
+                },
                 "semanticConditions": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 },
-                "pollIntervalMs": { "type": "number" }
+                "pollIntervalMs": {
+                  "type": "number"
+                }
               }
             }
           },
@@ -812,7 +1357,9 @@
         "owenBrowserBridge.captureDirectoryByPlatform": {
           "type": "object",
           "default": {},
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "properties": {
             "win32": {
               "type": "string",
@@ -855,6 +1402,11 @@
           "maximum": 500,
           "description": "Maximum number of pending browser commands. New commands are rejected when the queue is full."
         },
+        "owenBrowserBridge.preferredAgentId": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred browser agent id when multiple Edge or Chrome agents are connected. Leave empty to require targetAgentId when more than one agent is active."
+        },
         "owenBrowserBridge.captureRetentionDays": {
           "type": "number",
           "default": 0,
@@ -871,7 +1423,11 @@
         },
         "owenBrowserBridge.redactionProfile": {
           "type": "string",
-          "enum": ["off", "standard", "strict"],
+          "enum": [
+            "off",
+            "standard",
+            "strict"
+          ],
           "default": "standard",
           "description": "Redaction profile applied before browser capture JSON and Markdown files are stored."
         },
@@ -891,16 +1447,19 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "validate:browser": "node scripts/package-browser-extension.mjs --check",
+    "test:protocol": "node scripts/test-protocol-runtime.mjs",
+    "verify:actions": "node scripts/verify-action-registry.mjs",
     "package:vsix": "node scripts/package-vsix.mjs",
     "package:browser": "node scripts/package-browser-extension.mjs",
     "verify:release-assets": "node scripts/verify-release-assets.mjs",
+    "generate:checksums": "node scripts/generate-release-checksums.mjs",
     "install:local-vsix": "node scripts/install-local-vsix.mjs",
-    "package": "npm run package:vsix && npm run package:browser && npm run verify:release-assets",
-    "release:check": "npm run compile && npm run lint && npm run package",
+    "package": "npm run package:vsix && npm run package:browser && npm run generate:checksums && npm run verify:release-assets",
+    "release:check": "npm run compile && npm run lint && npm run test:protocol && npm run verify:actions && npm test -- --reporter dot && npm run package",
     "release:local": "npm run release:check && npm run install:local-vsix",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "node scripts/run-vscode-tests.mjs"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

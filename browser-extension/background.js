@@ -1,3 +1,5 @@
+importScripts('protocol-runtime.js');
+
 const DEFAULT_OPTIONS = {
   port: 17321,
   token: '',
@@ -10,6 +12,7 @@ const DEFAULT_OPTIONS = {
 
 let pollInProgress = false;
 let pollLoopTimer;
+let pollFailureCount = 0;
 let lastReplayScript;
 const stateCheckpoints = new Map();
 const executionRunHistory = new Map();
@@ -21,7 +24,12 @@ const SELECTOR_MEMORY_STORAGE_KEY = 'owenSelectorMemory';
 const VISUAL_ASSERT_STORAGE_KEY = 'owenVisualAssertBaseline';
 const BROWSER_JOBS_STORAGE_KEY = 'owenBrowserJobs';
 const SCENARIO_TEMPLATES_STORAGE_KEY = 'owenScenarioTemplates';
-const BRIDGE_PROTOCOL_VERSION = '2.0';
+const AGENT_ID_STORAGE_KEY = 'owenBrowserAgentId';
+const RESULT_OUTBOX_STORAGE_KEY = 'owenCommandResultOutbox';
+const CONNECTION_STATUS_STORAGE_KEY = 'owenBridgeConnectionStatus';
+const RUNTIME_STATE_STORAGE_KEY = 'owenBrowserRuntimeState';
+const BRIDGE_PROTOCOL_VERSION = globalThis.OwenProtocolRuntime.protocolVersion;
+let runtimeStateLoaded = false;
 
 chrome.runtime.onInstalled.addListener(() => {
   ensureCommandPolling();
@@ -83,32 +91,125 @@ async function pollForCommand() {
   }
 
   pollInProgress = true;
+  let nextPollDelay = 250;
   try {
+    const agentId = await getBrowserAgentId();
+    await flushCommandResultOutbox(options);
     const hasRunnableJob = await hasRunnableBrowserJob();
     const browserVersion = encodeURIComponent(chrome.runtime.getManifest().version);
-    const response = await fetch(`http://127.0.0.1:${options.port}/commands/next?waitMs=${hasRunnableJob ? 0 : 20000}&protocolVersion=${encodeURIComponent(BRIDGE_PROTOCOL_VERSION)}&browserVersion=${browserVersion}`, {
+    const browserName = encodeURIComponent(getBrowserName());
+    const response = await globalThis.OwenProtocolRuntime.fetchWithTimeout(`http://127.0.0.1:${options.port}/commands/next?waitMs=${hasRunnableJob ? 0 : 20000}&protocolVersion=${encodeURIComponent(BRIDGE_PROTOCOL_VERSION)}&browserVersion=${browserVersion}&browserName=${browserName}&agentId=${encodeURIComponent(agentId)}`, {
       method: 'GET',
       headers: { 'X-Owen-Bridge-Token': options.token }
-    });
+    }, hasRunnableJob ? 10000 : 26000);
     if (!response.ok) {
-      return;
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.message || detail.error || `Bridge poll failed with HTTP ${response.status}`);
     }
 
     const body = await response.json().catch(() => ({}));
+    if (body.protocolVersion !== BRIDGE_PROTOCOL_VERSION) {
+      throw new Error(`Bridge protocol mismatch. Browser=${BRIDGE_PROTOCOL_VERSION}, VS Code=${body.protocolVersion || 'missing'}.`);
+    }
+    pollFailureCount = 0;
+    await rememberConnectionStatus({ ok: true, agentId, protocolVersion: BRIDGE_PROTOCOL_VERSION, extensionVersion: body.extensionVersion, updatedAt: new Date().toISOString() });
     if (body.command) {
+      await acknowledgeBrowserCommand(options, body.command, agentId);
       const result = await executeBrowserCommand(body.command, options);
-      await postCommandResult(options, result);
+      result.agentId = agentId;
+      await enqueueCommandResult(result);
+      await flushCommandResultOutbox(options);
     } else if (hasRunnableJob) {
       await processNextBrowserJobStep();
     }
+  } catch (error) {
+    pollFailureCount += 1;
+    nextPollDelay = globalThis.OwenProtocolRuntime.retryDelay(pollFailureCount);
+    await rememberConnectionStatus({ ok: false, error: String(error?.message ?? error), retryInMs: nextPollDelay, updatedAt: new Date().toISOString() });
   } finally {
     pollInProgress = false;
-    scheduleCommandPoll(250);
+    scheduleCommandPoll(nextPollDelay);
+  }
+}
+
+async function getBrowserAgentId() {
+  const stored = await chrome.storage.local.get(AGENT_ID_STORAGE_KEY);
+  if (stored[AGENT_ID_STORAGE_KEY]) {
+    return stored[AGENT_ID_STORAGE_KEY];
+  }
+  const id = `agent-${crypto.randomUUID()}`;
+  await chrome.storage.local.set({ [AGENT_ID_STORAGE_KEY]: id });
+  return id;
+}
+
+function getBrowserName() {
+  const userAgent = navigator.userAgent || '';
+  if (/Edg\//.test(userAgent)) {
+    return 'Edge';
+  }
+  if (/Chrome\//.test(userAgent)) {
+    return 'Chrome';
+  }
+  return 'Chromium';
+}
+
+async function rememberConnectionStatus(status) {
+  await chrome.storage.local.set({ [CONNECTION_STATUS_STORAGE_KEY]: status });
+}
+
+async function ensureRuntimeStateLoaded() {
+  if (runtimeStateLoaded) {
+    return;
+  }
+  const stored = await chrome.storage.local.get(RUNTIME_STATE_STORAGE_KEY);
+  const state = stored[RUNTIME_STATE_STORAGE_KEY] || {};
+  restoreMap(stateCheckpoints, state.checkpoints, 100);
+  restoreMap(executionRunHistory, state.runs, 100);
+  restoreMap(recentCommandFailures, state.failures, 50);
+  runtimeStateLoaded = true;
+}
+
+function restoreMap(target, entries, limit) {
+  target.clear();
+  if (!Array.isArray(entries)) {
+    return;
+  }
+  for (const entry of entries.slice(-limit)) {
+    if (Array.isArray(entry) && entry.length === 2 && entry[0]) {
+      target.set(entry[0], entry[1]);
+    }
+  }
+}
+
+async function persistRuntimeState() {
+  await chrome.storage.local.set({
+    [RUNTIME_STATE_STORAGE_KEY]: {
+      checkpoints: [...stateCheckpoints.entries()].slice(-100),
+      runs: [...executionRunHistory.entries()].slice(-100),
+      failures: [...recentCommandFailures.entries()].slice(-50),
+      updatedAt: new Date().toISOString()
+    }
+  });
+}
+
+async function acknowledgeBrowserCommand(options, command, agentId) {
+  const response = await globalThis.OwenProtocolRuntime.fetchWithTimeout(`http://127.0.0.1:${options.port}/commands/ack`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Owen-Bridge-Token': options.token
+    },
+    body: JSON.stringify({ id: command.id, agentId, leaseMs: Math.min(Math.max(Number(command.timeoutMs) + 45000, 60000), 600000) })
+  }, 10000);
+  if (!response.ok) {
+    throw new Error(`Failed to acknowledge browser command ${command.id}: HTTP ${response.status}`);
   }
 }
 
 async function executeBrowserCommand(command, options) {
   try {
+    await ensureRuntimeStateLoaded();
+    await requireCommandHostPermissions(command);
     const workflow = command.action === 'runWorkflow' ? normalizeWorkflowSteps(command.steps) : [command];
     const executionTrail = [];
     let beforeAfterDiff;
@@ -175,6 +276,7 @@ async function executeBrowserCommand(command, options) {
         executionRunHistory.delete(oldest);
       }
     }
+    await persistRuntimeState();
 
     lastReplayScript = {
       exportedAt: new Date().toISOString(),
@@ -186,7 +288,7 @@ async function executeBrowserCommand(command, options) {
     return response;
   } catch (error) {
     const message = String(error?.message ?? error);
-    rememberCommandFailure(command, message);
+    await rememberCommandFailure(command, message);
     const authPrefix = 'AUTH_REQUIRED::';
     if (message.startsWith(authPrefix)) {
       const payloadText = message.slice(authPrefix.length);
@@ -202,6 +304,24 @@ async function executeBrowserCommand(command, options) {
     }
 
     return { id: command.id, ok: false, error: message };
+  }
+}
+
+async function requireCommandHostPermissions(command) {
+  const requestedUrls = [command.url, ...(Array.isArray(command.urls) ? command.urls : [])].filter(value => /^https?:/i.test(String(value || '')));
+  if (requestedUrls.length === 0) {
+    const activeTab = await getActiveTab();
+    if (activeTab.url) {
+      requestedUrls.push(activeTab.url);
+    }
+  }
+
+  for (const value of requestedUrls) {
+    const origin = `${new URL(value).origin}/*`;
+    const granted = await chrome.permissions.contains({ origins: [origin] });
+    if (!granted) {
+      throw new Error(`HOST_PERMISSION_REQUIRED: Open the browser popup on ${new URL(value).origin} and choose Grant current site access.`);
+    }
   }
 }
 
@@ -1091,6 +1211,7 @@ async function runStateCheckpoint(command, allowedHosts) {
     tabIndex: tab.index,
     ...result
   });
+  await persistRuntimeState();
 
   return { ok: true, checkpointName, saved: stateCheckpoints.get(checkpointName) };
 }
@@ -2015,7 +2136,7 @@ async function runEvidenceCompletenessCheck(command, allowedHosts) {
   };
 }
 
-function rememberCommandFailure(command, message) {
+async function rememberCommandFailure(command, message) {
   if (!command?.id) {
     return;
   }
@@ -2036,6 +2157,7 @@ function rememberCommandFailure(command, message) {
       recentCommandFailures.delete(oldest);
     }
   }
+  await persistRuntimeState();
 }
 
 async function runFailureExplainer(command, allowedHosts) {
@@ -3872,15 +3994,43 @@ async function getTabByIndex(targetTabIndex) {
   return target;
 }
 
-async function postCommandResult(options, result) {
-  await fetch(`http://127.0.0.1:${options.port}/commands/result`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Owen-Bridge-Token': options.token
-    },
-    body: JSON.stringify(result)
-  });
+async function enqueueCommandResult(result) {
+  const stored = await chrome.storage.local.get(RESULT_OUTBOX_STORAGE_KEY);
+  const outbox = Array.isArray(stored[RESULT_OUTBOX_STORAGE_KEY]) ? stored[RESULT_OUTBOX_STORAGE_KEY] : [];
+  const next = [...outbox.filter(item => item?.id !== result.id), result].slice(-100);
+  await chrome.storage.local.set({ [RESULT_OUTBOX_STORAGE_KEY]: next });
+}
+
+async function flushCommandResultOutbox(options) {
+  const stored = await chrome.storage.local.get(RESULT_OUTBOX_STORAGE_KEY);
+  const outbox = Array.isArray(stored[RESULT_OUTBOX_STORAGE_KEY]) ? stored[RESULT_OUTBOX_STORAGE_KEY] : [];
+  if (outbox.length === 0) {
+    return;
+  }
+
+  const remaining = [...outbox];
+  while (remaining.length > 0) {
+    const result = remaining[0];
+    const response = await globalThis.OwenProtocolRuntime.fetchWithTimeout(`http://127.0.0.1:${options.port}/commands/result`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Owen-Bridge-Token': options.token
+      },
+      body: JSON.stringify(result)
+    }, 15000);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      if (detail.discardResult === true) {
+        remaining.shift();
+        await chrome.storage.local.set({ [RESULT_OUTBOX_STORAGE_KEY]: remaining });
+        continue;
+      }
+      throw new Error(detail.message || `Failed to deliver browser command result ${result?.id || 'unknown'}: HTTP ${response.status}`);
+    }
+    remaining.shift();
+    await chrome.storage.local.set({ [RESULT_OUTBOX_STORAGE_KEY]: remaining });
+  }
 }
 
 async function captureCurrentTab() {

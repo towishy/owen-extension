@@ -41,10 +41,35 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           VSIX="dist/owen-browser-bridge-${VERSION}.vsix"
           BROWSER_ZIP="dist/owen-browser-capture-browser-extension-${VERSION}.zip"
+          CHECKSUMS="dist/SHA256SUMS.txt"
           TAG="v${VERSION}"
 
           if gh release view "${TAG}" >/dev/null 2>&1; then
-            gh release upload "${TAG}" "${VSIX}" "${BROWSER_ZIP}" --clobber
+            gh release upload "${TAG}" "${VSIX}" "${BROWSER_ZIP}" "${CHECKSUMS}" --clobber
           else
-            gh release create "${TAG}" "${VSIX}" "${BROWSER_ZIP}" --title "${VERSION}" --generate-notes
+            gh release create "${TAG}" "${VSIX}" "${BROWSER_ZIP}" "${CHECKSUMS}" --title "${VERSION}" --generate-notes
           fi
+
+      - name: Retain only the current release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          CURRENT_TAG="v${VERSION}"
+
+          gh release list --limit 1000 --json tagName --jq '.[].tagName' | while IFS= read -r RELEASE_TAG; do
+            if [ -n "${RELEASE_TAG}" ] && [ "${RELEASE_TAG}" != "${CURRENT_TAG}" ]; then
+              gh release delete "${RELEASE_TAG}" --yes
+            fi
+          done
+
+          git ls-remote --tags --refs origin | awk '{ sub("refs/tags/", "", $2); print $2 }' | while IFS= read -r REMOTE_TAG; do
+            if [ -n "${REMOTE_TAG}" ] && [ "${REMOTE_TAG}" != "${CURRENT_TAG}" ]; then
+              git push origin --delete "${REMOTE_TAG}"
+            fi
+          done
+
+          RELEASES=$(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+          TAGS=$(git ls-remote --tags --refs origin | awk '{ sub("refs/tags/", "", $2); print $2 }')
+          [ "${RELEASES}" = "${CURRENT_TAG}" ] || { echo "Expected only release ${CURRENT_TAG}, found: ${RELEASES}"; exit 1; }
+          [ "${TAGS}" = "${CURRENT_TAG}" ] || { echo "Expected only tag ${CURRENT_TAG}, found: ${TAGS}"; exit 1; }

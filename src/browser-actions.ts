@@ -17,6 +17,19 @@ export type BrowserAction = typeof BROWSER_ACTIONS[number];
 export type BrowserActionCategory = 'read' | 'interact' | 'workflow' | 'evidence' | 'admin';
 export type BrowserActionRisk = 'read' | 'write' | 'destructive';
 
+const REQUIRED_INPUTS = new Map<BrowserAction, readonly string[]>([
+	['navigate', ['url']], ['openInNewTab', ['url']], ['type', ['value', 'selector|text|label|targetHint']],
+	['waitForText', ['text']], ['captureElement', ['selector|targetHint']], ['captureRegion', ['regionX', 'regionY', 'regionWidth', 'regionHeight']],
+	['journeyCapture', ['urls']], ['smartFormFill', ['formFields']], ['stateCheckpoint', ['checkpointName']],
+	['rollbackToCheckpoint', ['checkpointName']], ['humanReviewGate', ['approvalKeyword']], ['evidenceClaimCheck', ['claim']],
+	['buildEvidencePack', ['captureGroup|investigationName']], ['browserRunBundle', ['captureGroup|investigationName']],
+	['returnToTab', ['returnToRole|targetTabIndex']], ['startBrowserJob', ['jobName', 'steps']], ['getBrowserJob', ['jobName']],
+	['cancelBrowserJob', ['jobName']], ['recordWorkflow', ['macroName', 'steps']], ['replayWorkflow', ['macroName']],
+	['saveScenarioTemplate', ['scenarioName', 'scenarioTemplates']], ['deleteScenarioTemplate', ['scenarioName']],
+	['runScenarioTemplate', ['scenarioName']], ['runWorkflow', ['preset|steps']]
+]);
+const EFFECT_ACTIONS = new Set<BrowserAction>(['click', 'type', 'scroll', 'keyPress', 'selectOption', 'clearInput']);
+
 const DESTRUCTIVE_ACTIONS = new Set<BrowserAction>(['closeTab']);
 const WRITE_ACTIONS = new Set<BrowserAction>([
 	'click', 'type', 'navigate', 'scroll', 'keyPress', 'selectOption', 'clearInput', 'back', 'forward', 'reload',
@@ -48,7 +61,15 @@ export function getBrowserActionDefinition(name: BrowserAction) {
 		: WORKFLOW_ACTIONS.has(name)
 		? 'workflow'
 		: EVIDENCE_ACTIONS.has(name) ? 'evidence' : risk !== 'read' ? 'interact' : 'read';
-	return { name, category, risk };
+	return {
+		name,
+		category,
+		risk,
+		requiredInputs: REQUIRED_INPUTS.get(name) ?? [],
+		supportsEffectPolicy: EFFECT_ACTIONS.has(name),
+		requiresConfirmation: risk === 'destructive',
+		minProtocolVersion: '3.0'
+	};
 }
 
 export const BROWSER_ACTION_REGISTRY = BROWSER_ACTIONS.map(getBrowserActionDefinition);

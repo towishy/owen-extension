@@ -51,6 +51,32 @@ h1 {
   font-size: 12px;
 }
 
+.agent-meta {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.agent-meta div {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 8px;
+}
+
+.agent-meta dt {
+  color: var(--muted);
+}
+
+.agent-meta dd {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 #status {
   color: var(--muted);
   font-size: 12px;
@@ -88,4 +114,8 @@ button {
   background: transparent;
   color: var(--fg);
   cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
 }

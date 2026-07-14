@@ -15,6 +15,13 @@
 
       <p class="agent-note">VS Code controls the active browser tab after pairing. Keep this extension enabled; no manual tab sending is required.</p>
 
+      <dl class="agent-meta">
+        <div><dt>Agent</dt><dd id="agentId">Loading...</dd></div>
+        <div><dt>Bridge</dt><dd id="connectionStatus">Unknown</dd></div>
+      </dl>
+
+      <button id="grantSite" type="button">Grant current site access</button>
+
       <label>
         VS Code Port
         <input id="port" type="number" min="1024" max="65535" value="17321">
@@ -54,7 +61,7 @@
         <span>Accept Copilot browser actions</span>
       </label>
 
-      <button id="save">Save Settings</button>
+      <button id="save" type="button">Save Settings</button>
     </main>
     <script src="popup.js"></script>
   </body>

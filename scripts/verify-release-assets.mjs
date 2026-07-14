@@ -1,4 +1,5 @@
 import AdmZip from 'adm-zip';
+import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,7 @@ const zipName = `owen-browser-capture-browser-extension-${version}.zip`;
 const distDir = join(root, 'dist');
 const vsix = join(distDir, vsixName);
 const browserZip = join(distDir, zipName);
+const checksums = join(distDir, 'SHA256SUMS.txt');
 const browserZipRoot = `owen-browser-capture-browser-extension-${version}`;
 
 for (const asset of [vsix, browserZip]) {
@@ -20,9 +22,18 @@ for (const asset of [vsix, browserZip]) {
   }
 }
 
+const checksumLines = readFileSync(checksums, 'utf8').trim().split(/\r?\n/);
+for (const asset of [vsix, browserZip]) {
+  const expected = createHash('sha256').update(readFileSync(asset)).digest('hex');
+  const filename = asset.split(/[\\/]/).pop();
+  if (!checksumLines.includes(`${expected}  ${filename}`)) {
+    throw new Error(`Missing or invalid SHA-256 checksum for ${filename}`);
+  }
+}
+
 const zip = new AdmZip(browserZip);
 const entries = new Set(zip.getEntries().map(entry => entry.entryName));
-for (const file of ['manifest.json', 'background.js', 'popup.html', 'popup.js', 'popup.css']) {
+for (const file of ['manifest.json', 'protocol-runtime.js', 'background.js', 'popup.html', 'popup.js', 'popup.css']) {
   const expected = `${browserZipRoot}/${file}`;
   if (!entries.has(expected)) {
     throw new Error(`Browser extension ZIP is missing ${expected}`);
@@ -32,3 +43,4 @@ for (const file of ['manifest.json', 'background.js', 'popup.html', 'popup.js', 
 console.log(`Verified release assets for v${version}:`);
 console.log(`- dist/${vsixName}`);
 console.log(`- dist/${zipName}`);
+console.log('- dist/SHA256SUMS.txt');
