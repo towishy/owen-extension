@@ -29,7 +29,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.24.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.25.vsix --force
 ```
 
 macOS terminal:
@@ -39,7 +39,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.24.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.25.vsix --force
 ```
 
 If `code` is unavailable, open VS Code and run `Shell Command: Install 'code' command in PATH`.
@@ -119,12 +119,13 @@ The local server listens on `http://127.0.0.1:17321` by default.
 
 If you need to rotate the token, click **Regenerate and Copy Token** on the setup page, then paste the new token into the browser extension and click **Save Settings** again.
 
-## 5. Capture a Portal Page
+## 5. Control and Capture a Portal Page from VS Code
 
 1. Open a page listed in **Allowed Hosts** on the setup page, for example `https://security.microsoft.com`.
-2. Click the Owen Browser Bridge Agent browser extension icon.
-3. Click **Send Current Tab**.
-4. In VS Code, run `Owen Browser Bridge: Show Latest Capture`.
+2. In Copilot Chat, call `#browserAct { "action": "capture", "captureAfter": true, "includeScreenshot": true }` or ask Copilot to inspect the current tab.
+3. Use `#getBrowserState` to read the active tab state, or run `Owen Browser Bridge: Show Latest Capture`.
+
+After pairing, the browser extension is passive. The popup does not need to stay open, and each tab does not need to be sent manually.
 
 The capture is stored under the folder shown in **Capture Directory** on the setup page. By default, this is:
 
@@ -271,24 +272,24 @@ Settings JSON example:
 2. Run `Developer: Reload Window` in VS Code.
 3. Search `Owen Browser Bridge` again from `Ctrl+Shift+P`.
 
-### Browser popup shows `host_not_allowed`
+### `#browserAct` reports `host_not_allowed`
 
 Open `Owen Browser Bridge: Open Setup Page` and add that page's hostname under **Allowed Hosts**. For Microsoft subdomains, `*.microsoft.com` covers hosts such as `security.microsoft.com` and `learn.microsoft.com`.
 
-### Browser popup shows `unauthorized`
+### `#browserAct` reports `unauthorized`
 
 1. Run `Owen Browser Bridge: Open Setup Page` in VS Code.
 2. Click **Copy Pairing Token**.
 3. Paste the token into the browser popup.
 4. Click **Save Settings**.
-5. Try **Send Current Tab** again.
+5. Retry the action from Copilot Chat.
 
 ### `#browserAct` times out
 
 1. Confirm the browser extension popup has **Accept Copilot browser actions** enabled.
 2. Confirm the pairing token and port are saved in the browser popup.
 3. Keep an allowed Chrome/Edge tab active while Copilot waits for the action result.
-4. The extension polls for commands about every 30 seconds, so short delays are expected.
+4. Reload the unpacked browser extension once after updating its files. Commands normally arrive through long polling; the 30-second alarm only recovers a suspended service worker.
 
 ### Inspect recent browser action traces
 

@@ -45,6 +45,12 @@ h1 {
   font-size: 16px;
 }
 
+.agent-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 #status {
   color: var(--muted);
   font-size: 12px;
@@ -81,20 +87,4 @@ button {
   background: transparent;
   color: var(--fg);
   cursor: pointer;
-}
-
-button.primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-weight: 650;
-}
-
-pre {
-  max-height: 120px;
-  overflow: auto;
-  margin: 0;
-  white-space: pre-wrap;
-  color: var(--muted);
-  font-size: 12px;
 }

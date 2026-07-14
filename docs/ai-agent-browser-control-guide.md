@@ -19,6 +19,8 @@ Before calling browser-control actions, confirm these conditions:
 5. The active tab host is allowed by `owenBrowserBridge.allowedHosts`.
 6. The user is signed in manually when a portal requires authentication.
 
+After this one-time setup, the browser extension is passive. The agent starts capture, inspection, navigation, and guarded downloads from VS Code; the operator does not open the popup or click a manual tab-send button for each page.
+
 Default local bridge URL:
 
 ```text
@@ -68,7 +70,7 @@ Example body:
 }
 ```
 
-The `/commands/enqueue` response includes the queued command and completion result. Browser actions are executed by the paired browser extension through polling.
+The `/commands/enqueue` response includes the queued command and completion result. Browser actions are executed by the paired browser extension through near-immediate long polling, with a 30-second alarm fallback if the MV3 service worker is suspended.
 
 Do not ask the user to paste the pairing token into chat. If a token is required and not already available to the calling environment, ask the user to enter it directly in the browser extension or VS Code setup UI.
 

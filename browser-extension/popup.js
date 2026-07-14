@@ -15,38 +15,14 @@ const elements = {
   includeHtml: document.getElementById('includeHtml'),
   includeScreenshot: document.getElementById('includeScreenshot'),
   save: document.getElementById('save'),
-  capture: document.getElementById('capture'),
-  status: document.getElementById('status'),
-  result: document.getElementById('result')
+  status: document.getElementById('status')
 };
 
 loadOptions();
 
 elements.save.addEventListener('click', async () => {
   await saveOptions();
-  setStatus('Saved');
-});
-
-elements.capture.addEventListener('click', async () => {
-  await saveOptions();
-  setStatus('Capturing');
-  elements.capture.disabled = true;
-  elements.result.textContent = '';
-
-  try {
-    const response = await chrome.runtime.sendMessage({ type: 'capture-current-tab' });
-    if (!response?.ok) {
-      throw new Error(response?.error ?? 'Capture failed');
-    }
-
-    setStatus('Sent');
-    elements.result.textContent = JSON.stringify(response.result, null, 2);
-  } catch (error) {
-    setStatus('Failed');
-    elements.result.textContent = String(error?.message ?? error);
-  } finally {
-    elements.capture.disabled = false;
-  }
+  setStatus('Passive');
 });
 
 async function loadOptions() {
@@ -68,6 +44,7 @@ async function saveOptions() {
     includeHtml: elements.includeHtml.checked,
     includeScreenshot: elements.includeScreenshot.checked
   });
+  await chrome.runtime.sendMessage({ type: 'wake-command-polling' });
 }
 
 function setStatus(value) {

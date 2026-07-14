@@ -414,6 +414,7 @@ let output: vscode.OutputChannel;
 let setupPanel: vscode.WebviewPanel | undefined;
 const browserCommandQueue: BrowserCommand[] = [];
 const browserCommandWaiters = new Map<string, { resolve: (value: BrowserCommandCompletion) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }>();
+const browserCommandAvailabilityWaiters = new Set<() => void>();
 const DEFAULT_ALLOWED_HOSTS = [
 	'security.microsoft.com',
 	'security.microsoft365.com',
@@ -510,12 +511,17 @@ async function handleRequest(context: vscode.ExtensionContext, request: http.Inc
 		return;
 	}
 
-	if (request.url === '/commands/next' && request.method === 'GET') {
+	if (request.url?.startsWith('/commands/next') && request.method === 'GET') {
 		if (!await isAuthorized(context, request)) {
 			writeJson(response, 401, { error: 'unauthorized' });
 			return;
 		}
 
+		const requestUrl = new URL(request.url, 'http://127.0.0.1');
+		const waitMs = Math.min(Math.max(Number(requestUrl.searchParams.get('waitMs')) || 0, 0), 25000);
+		if (browserCommandQueue.length === 0 && waitMs > 0) {
+			await waitForBrowserCommand(waitMs);
+		}
 		writeJson(response, 200, { command: browserCommandQueue.shift() ?? null });
 		return;
 	}
@@ -1256,6 +1262,10 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 
 function enqueueBrowserCommand(command: BrowserCommand) {
 	browserCommandQueue.push(command);
+	for (const notify of browserCommandAvailabilityWaiters) {
+		notify();
+	}
+	browserCommandAvailabilityWaiters.clear();
 	output.appendLine(`Queued browser command ${command.id}: ${command.action} (queue: ${browserCommandQueue.length})`);
 	return new Promise<BrowserCommandCompletion>((resolve, reject) => {
 		const timeout = setTimeout(() => {
@@ -1263,6 +1273,18 @@ function enqueueBrowserCommand(command: BrowserCommand) {
 			reject(new Error(`Timed out waiting for paired browser command result: ${command.id}`));
 		}, command.timeoutMs + 35000);
 		browserCommandWaiters.set(command.id, { resolve, reject, timeout });
+	});
+}
+
+function waitForBrowserCommand(waitMs: number) {
+	return new Promise<void>(resolve => {
+		const finish = () => {
+			clearTimeout(timeout);
+			browserCommandAvailabilityWaiters.delete(finish);
+			resolve();
+		};
+		const timeout = setTimeout(finish, waitMs);
+		browserCommandAvailabilityWaiters.add(finish);
 	});
 }
 

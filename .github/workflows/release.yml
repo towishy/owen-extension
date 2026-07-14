@@ -46,5 +46,5 @@ jobs:
           if gh release view "${TAG}" >/dev/null 2>&1; then
             gh release upload "${TAG}" "${VSIX}" "${BROWSER_ZIP}" --clobber
           else
-            gh release create "${TAG}" "${VSIX}" "${BROWSER_ZIP}" --title "Owen Browser Bridge ${TAG}" --generate-notes
+            gh release create "${TAG}" "${VSIX}" "${BROWSER_ZIP}" --title "${VERSION}" --generate-notes
           fi

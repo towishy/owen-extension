@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-07-14
+
+- Changed the browser extension into a passive paired agent controlled from VS Code.
+- Added long-poll command delivery for near-immediate `browser_act` execution without opening the browser popup.
+- Kept the 30-second browser alarm as a service-worker recovery fallback.
+- Removed the manual **Send Current Tab** control from the browser popup.
+
 ## [0.1.24] - 2026-06-06
 
 - Added `runScenarioTemplate` for reusable browser automation scenario templates.

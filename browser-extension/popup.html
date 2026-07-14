@@ -10,8 +10,10 @@
     <main>
       <header>
         <h1>Owen Browser Bridge Agent</h1>
-        <span id="status" aria-live="polite">Ready</span>
+        <span id="status" aria-live="polite">Passive</span>
       </header>
+
+      <p class="agent-note">VS Code controls the active browser tab after pairing. Keep this extension enabled; no manual tab sending is required.</p>
 
       <label>
         VS Code Port
@@ -44,9 +46,6 @@
       </label>
 
       <button id="save">Save Settings</button>
-      <button id="capture" class="primary">Send Current Tab</button>
-
-      <pre id="result"></pre>
     </main>
     <script src="popup.js"></script>
   </body>

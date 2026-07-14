@@ -11,6 +11,12 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
+## New in 0.1.25
+
+- The browser extension now acts as a passive paired agent. After one-time setup, VS Code controls the active tab through `#browserAct`; opening the popup or manually sending a tab is not required.
+- Long-poll command delivery provides near-immediate control while the 30-second browser alarm remains as a service-worker recovery fallback.
+- The popup now contains pairing and capture-default settings only.
+
 ## New in 0.1.24
 
 - Added `runScenarioTemplate` for reusable browser automation scenario templates.
@@ -130,7 +136,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.24.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.25.vsix --force
 ```
 
 macOS terminal:
@@ -140,7 +146,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.24.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.25.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -198,13 +204,13 @@ If the token ever needs to be replaced, click **Regenerate and Copy Token** and 
 7. Choose whether to include **screenshot** and **HTML snapshot**.
 8. Click **Save Settings**.
 
-### 4. Send a browser page to VS Code
+### 4. Control and capture the active browser page from VS Code
 
 1. Open a page listed in **Allowed Hosts** on the setup page, such as `https://security.microsoft.com` or `https://portal.azure.com`.
-2. Click the **Owen Browser Bridge Agent** browser extension icon.
-3. Click **Send Current Tab**.
-4. The popup should show `Sent`.
-5. In VS Code, run `Owen Browser Bridge: Show Latest Capture` to open the saved Markdown note.
+2. In Copilot Chat, call `#browserAct { "action": "capture", "captureAfter": true, "includeScreenshot": true }` or ask Copilot to inspect the current tab.
+3. Use `#getBrowserState` to read the active tab state, or run `Owen Browser Bridge: Show Latest Capture` to open the saved Markdown note.
+
+The browser popup is passive after pairing. It does not need to remain open, and there is no manual tab-send step.
 
 Captured files are stored in the folder shown under **Capture Directory** on the setup page. The default layout is `raw/browser-captures/<host>/<group>/` under the current workspace. If **Investigation / Case** is empty, the extension tries to infer an incident or alert id from the URL, then falls back to the capture date.
 
@@ -436,7 +442,7 @@ In VS Code, press `F5` to launch an Extension Development Host. Then run:
 Owen Browser Bridge: Open Setup Page
 ```
 
-Click **Start Server**, click **Copy Pairing Token**, then load [browser-extension](browser-extension) as an unpacked extension in Edge or Chrome, paste the token, open an allowed portal page, and click **Send Current Tab**.
+Click **Start Server**, click **Copy Pairing Token**, then load [browser-extension](browser-extension) as an unpacked extension in Edge or Chrome, paste the token, save the settings, and open an allowed portal page. Control and capture the active tab from Copilot Chat with `#browserAct`.
 
 For the full pairing walkthrough, see [Pairing Setup](#pairing-setup).
 

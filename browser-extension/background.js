@@ -8,6 +8,7 @@ const DEFAULT_OPTIONS = {
 };
 
 let pollInProgress = false;
+let pollLoopTimer;
 let lastReplayScript;
 const stateCheckpoints = new Map();
 const executionRunHistory = new Map();
@@ -20,11 +21,11 @@ const VISUAL_ASSERT_STORAGE_KEY = 'owenVisualAssertBaseline';
 const BROWSER_JOBS_STORAGE_KEY = 'owenBrowserJobs';
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create('owen-command-poll', { periodInMinutes: 0.5 });
+  ensureCommandPolling();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  chrome.alarms.create('owen-command-poll', { periodInMinutes: 0.5 });
+  ensureCommandPolling();
 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
@@ -34,6 +35,12 @@ chrome.alarms.onAlarm.addListener(alarm => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'wake-command-polling') {
+    scheduleCommandPoll(0);
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message?.type !== 'capture-current-tab') {
     return false;
   }
@@ -45,7 +52,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-pollForCommand().catch(() => undefined);
+ensureCommandPolling();
+
+function ensureCommandPolling() {
+  chrome.alarms.create('owen-command-poll', { periodInMinutes: 0.5 });
+  scheduleCommandPoll(0);
+}
+
+function scheduleCommandPoll(delayMs = 250) {
+  if (pollLoopTimer) {
+    clearTimeout(pollLoopTimer);
+  }
+  pollLoopTimer = setTimeout(() => {
+    pollLoopTimer = undefined;
+    pollForCommand().catch(() => undefined);
+  }, delayMs);
+}
 
 async function pollForCommand() {
   if (pollInProgress) {
@@ -59,7 +81,7 @@ async function pollForCommand() {
 
   pollInProgress = true;
   try {
-    const response = await fetch(`http://127.0.0.1:${options.port}/commands/next`, {
+    const response = await fetch(`http://127.0.0.1:${options.port}/commands/next?waitMs=20000`, {
       method: 'GET',
       headers: { 'X-Owen-Bridge-Token': options.token }
     });
@@ -74,6 +96,7 @@ async function pollForCommand() {
     }
   } finally {
     pollInProgress = false;
+    scheduleCommandPoll(250);
   }
 }
 
