@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -21,6 +21,12 @@
     "onLanguageModelTool:get_browser_state",
     "onLanguageModelTool:read_browser_capture",
     "onLanguageModelTool:read_browser_capture_group",
+    "onLanguageModelTool:search_browser_captures",
+    "onLanguageModelTool:browser_read",
+    "onLanguageModelTool:browser_interact",
+    "onLanguageModelTool:browser_workflow",
+    "onLanguageModelTool:browser_evidence",
+    "onLanguageModelTool:browser_admin",
     "onLanguageModelTool:browser_act"
   ],
   "main": "./out/extension.js",
@@ -155,6 +161,130 @@
         }
       },
       {
+        "name": "search_browser_captures",
+        "displayName": "Search Browser Captures",
+        "userDescription": "Searches stored browser captures by text, host, group, and date.",
+        "modelDescription": "Use this tool to find prior browser evidence across investigation groups without reading every capture. It searches the local capture catalog by title, URL, host, group, id, and collected date.",
+        "toolReferenceName": "searchBrowserCaptures",
+        "tags": ["browser", "capture", "search", "investigation"],
+        "icon": "$(search)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string", "description": "Text matched against capture id, title, URL, host, and group." },
+            "host": { "type": "string", "description": "Optional exact or partial host filter." },
+            "group": { "type": "string", "description": "Optional exact or partial investigation group filter." },
+            "from": { "type": "string", "description": "Optional inclusive ISO date/time lower bound." },
+            "to": { "type": "string", "description": "Optional inclusive ISO date/time upper bound." },
+            "limit": { "type": "number", "minimum": 1, "maximum": 200, "description": "Maximum results, default 20." }
+          },
+          "required": []
+        }
+      },
+      {
+        "name": "browser_read",
+        "displayName": "Read Paired Browser",
+        "userDescription": "Runs read-only inspection and readiness actions in the paired browser.",
+        "modelDescription": "Prefer this compact tool for page inspection, waits, target discovery, runtime snapshots, safety previews, and readiness checks. Use browser_act for uncommon advanced inputs.",
+        "toolReferenceName": "browserRead",
+        "tags": ["browser", "read", "inspect"],
+        "icon": "$(eye)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": { "type": "string", "enum": ["readPage", "waitForText", "wait", "waitPreset", "hover", "listInteractables", "inspectTargets", "runtimeSnapshot", "exportReplay", "safeDownloadAndHash", "stateCheckpoint", "humanReviewGate", "semanticWait", "policyGuard", "mapForm", "watchPageChanges", "safeActionPreview", "stableTargetProfile", "failureExplainer", "waitProfiler", "automationHealthScore", "sensitiveActionGuard", "popupGuard", "tabRunSummary", "assertPageContract"] },
+            "selector": { "type": "string" }, "text": { "type": "string" }, "targetHint": { "type": "string" },
+            "timeoutMs": { "type": "number" }, "captureAfter": { "type": "boolean" }, "investigationName": { "type": "string" }
+          },
+          "required": ["action"],
+          "additionalProperties": true
+        }
+      },
+      {
+        "name": "browser_interact",
+        "displayName": "Interact With Paired Browser",
+        "userDescription": "Runs direct navigation and interaction actions in the paired browser.",
+        "modelDescription": "Use for click, type, navigation, scroll, history, tab, form, and rollback actions. effectPolicy=require can reject no-effect interactions.",
+        "toolReferenceName": "browserInteract",
+        "tags": ["browser", "interact", "automation"],
+        "icon": "$(cursor)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": { "type": "string", "enum": ["click", "type", "navigate", "scroll", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "smartFormFill", "rollbackToCheckpoint", "tabOrchestrator", "returnToTab"] },
+            "selector": { "type": "string" }, "text": { "type": "string" }, "value": { "type": "string" }, "url": { "type": "string" },
+            "effectPolicy": { "type": "string", "enum": ["none", "observe", "require"] }, "confirmDangerous": { "type": "boolean" },
+            "acknowledgement": { "type": "string" }, "timeoutMs": { "type": "number" }, "captureAfter": { "type": "boolean" }, "investigationName": { "type": "string" }
+          },
+          "required": ["action"],
+          "additionalProperties": true
+        }
+      },
+      {
+        "name": "browser_workflow",
+        "displayName": "Run Browser Workflow",
+        "userDescription": "Runs multi-step and reusable workflows in the paired browser.",
+        "modelDescription": "Use for journeys, pagination, conditional and bulk workflows, drilldown, macro replay, scenario execution, auth resume, and runWorkflow.",
+        "toolReferenceName": "browserWorkflow",
+        "tags": ["browser", "workflow", "automation"],
+        "icon": "$(run-all)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": { "type": "string", "enum": ["journeyCapture", "paginateCapture", "conditionalWorkflow", "multiTabCrawl", "domDiffTimeline", "bulkActionFromList", "planAndRun", "guidedDrilldown", "replayWorkflow", "runScenarioTemplate", "resumeAfterAuth", "runWorkflow"] },
+            "steps": { "type": "array", "items": { "type": "object" } }, "scenarioName": { "type": "string" }, "macroName": { "type": "string" },
+            "params": { "type": "object" }, "timeoutMs": { "type": "number" }, "captureAfter": { "type": "boolean" }, "investigationName": { "type": "string" }
+          },
+          "required": ["action"],
+          "additionalProperties": true
+        }
+      },
+      {
+        "name": "browser_evidence",
+        "displayName": "Collect Browser Evidence",
+        "userDescription": "Captures, validates, compares, and packages browser evidence.",
+        "modelDescription": "Use for screenshots, OCR hints, network and table evidence, visual assertions, claim checks, evidence packs, navigation graphs, and handoffs.",
+        "toolReferenceName": "browserEvidence",
+        "tags": ["browser", "evidence", "capture"],
+        "icon": "$(verified)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": { "type": "string", "enum": ["capture", "captureElement", "captureRegion", "ocrSnapshot", "dataGapGuard", "networkTraceCapture", "tableExtract", "compareCaptureRuns", "visualAssert", "accessibilitySnapshot", "highlightEvidence", "evidenceClaimCheck", "tableWatchAndDiff", "browserRunBundle", "evidenceCompletenessCheck", "buildEvidencePack", "buildNavigationGraph", "createHandoff"] },
+            "selector": { "type": "string" }, "captureGroup": { "type": "string" }, "claim": { "type": "string" },
+            "includeScreenshot": { "type": "boolean" }, "captureAfter": { "type": "boolean" }, "investigationName": { "type": "string" }, "timeoutMs": { "type": "number" }
+          },
+          "required": ["action"],
+          "additionalProperties": true
+        }
+      },
+      {
+        "name": "browser_admin",
+        "displayName": "Manage Browser Automation",
+        "userDescription": "Manages jobs, macros, templates, selector health, and review queues.",
+        "modelDescription": "Use for browser job lifecycle, macro recording, persisted scenario template management, selector health reports, and capture review queues.",
+        "toolReferenceName": "browserAdmin",
+        "tags": ["browser", "admin", "jobs", "templates"],
+        "icon": "$(settings-gear)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": { "type": "string", "enum": ["selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "listScenarioTemplates", "saveScenarioTemplate", "deleteScenarioTemplate", "exportScenarioTemplates"] },
+            "jobName": { "type": "string" }, "macroName": { "type": "string" }, "scenarioName": { "type": "string" },
+            "steps": { "type": "array", "items": { "type": "object" } }, "scenarioTemplates": { "type": "object" }, "templateVersion": { "type": "string" },
+            "maxEntries": { "type": "number" }, "captureAfter": { "type": "boolean" }
+          },
+          "required": ["action"],
+          "additionalProperties": true
+        }
+      },
+      {
         "name": "browser_act",
         "displayName": "Control Paired Browser",
         "userDescription": "Sends a safe action to the paired browser and returns the resulting page state.",
@@ -174,7 +304,7 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "waitPreset", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "visualAssert", "accessibilitySnapshot", "mapForm", "watchPageChanges", "highlightEvidence", "planAndRun", "evidenceClaimCheck", "tableWatchAndDiff", "browserRunBundle", "safeActionPreview", "stableTargetProfile", "guidedDrilldown", "evidenceCompletenessCheck", "failureExplainer", "waitProfiler", "automationHealthScore", "sensitiveActionGuard", "tabOrchestrator", "popupGuard", "returnToTab", "tabRunSummary", "buildEvidencePack", "buildNavigationGraph", "assertPageContract", "createHandoff", "selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "replayWorkflow", "runScenarioTemplate", "resumeAfterAuth", "runWorkflow"],
+              "enum": ["readPage", "capture", "click", "type", "navigate", "waitForText", "wait", "waitPreset", "scroll", "hover", "keyPress", "selectOption", "clearInput", "back", "forward", "reload", "openInNewTab", "switchTab", "closeTab", "listInteractables", "inspectTargets", "captureElement", "captureRegion", "journeyCapture", "paginateCapture", "smartFormFill", "conditionalWorkflow", "multiTabCrawl", "runtimeSnapshot", "domDiffTimeline", "ocrSnapshot", "dataGapGuard", "exportReplay", "networkTraceCapture", "safeDownloadAndHash", "tableExtract", "stateCheckpoint", "rollbackToCheckpoint", "humanReviewGate", "bulkActionFromList", "semanticWait", "compareCaptureRuns", "policyGuard", "visualAssert", "accessibilitySnapshot", "mapForm", "watchPageChanges", "highlightEvidence", "planAndRun", "evidenceClaimCheck", "tableWatchAndDiff", "browserRunBundle", "safeActionPreview", "stableTargetProfile", "guidedDrilldown", "evidenceCompletenessCheck", "failureExplainer", "waitProfiler", "automationHealthScore", "sensitiveActionGuard", "tabOrchestrator", "popupGuard", "returnToTab", "tabRunSummary", "buildEvidencePack", "buildNavigationGraph", "assertPageContract", "createHandoff", "selectorHealthReport", "captureReviewQueue", "startBrowserJob", "getBrowserJob", "cancelBrowserJob", "recordWorkflow", "replayWorkflow", "listScenarioTemplates", "saveScenarioTemplate", "deleteScenarioTemplate", "exportScenarioTemplates", "runScenarioTemplate", "resumeAfterAuth", "runWorkflow"],
               "description": "Browser action to run. Defaults to readPage."
             },
             "selector": {
@@ -333,6 +463,11 @@
               "type": "boolean",
               "description": "Capture lightweight before/after DOM diff metadata around the action run."
             },
+            "effectPolicy": {
+              "type": "string",
+              "enum": ["none", "observe", "require"],
+              "description": "Observe whether interactive actions changed URL, DOM, scroll, focus, or target state. require fails actions with no observed effect."
+            },
             "targetHint": {
               "type": "string",
               "description": "Natural-language target hint used by inspectTargets or auto-healing target selection."
@@ -354,6 +489,10 @@
               "type": "object",
               "description": "Optional custom scenario template registry. Each value can include description, category, defaults, and steps.",
               "additionalProperties": { "type": "object" }
+            },
+            "templateVersion": {
+              "type": "string",
+              "description": "Version label stored with saveScenarioTemplate, such as 1.2.0."
             },
             "assertText": {
               "type": "string",
@@ -708,6 +847,27 @@
           "type": "boolean",
           "default": true,
           "description": "Start the local browser capture server when VS Code finishes startup."
+        },
+        "owenBrowserBridge.commandQueueMaxSize": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Maximum number of pending browser commands. New commands are rejected when the queue is full."
+        },
+        "owenBrowserBridge.captureRetentionDays": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 3650,
+          "description": "Delete capture files older than this many days after a new capture is stored. Zero disables age-based retention."
+        },
+        "owenBrowserBridge.captureRetentionMaxItems": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 100000,
+          "description": "Keep at most this many indexed captures. Zero disables count-based retention."
         },
         "owenBrowserBridge.redactionProfile": {
           "type": "string",

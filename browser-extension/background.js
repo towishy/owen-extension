@@ -4,7 +4,8 @@ const DEFAULT_OPTIONS = {
   investigationName: '',
   commandPolling: true,
   includeHtml: false,
-  includeScreenshot: true
+  includeScreenshot: true,
+  screenshotRedaction: 'standard'
 };
 
 let pollInProgress = false;
@@ -19,6 +20,8 @@ const WORKFLOW_MACROS_STORAGE_KEY = 'owenWorkflowMacros';
 const SELECTOR_MEMORY_STORAGE_KEY = 'owenSelectorMemory';
 const VISUAL_ASSERT_STORAGE_KEY = 'owenVisualAssertBaseline';
 const BROWSER_JOBS_STORAGE_KEY = 'owenBrowserJobs';
+const SCENARIO_TEMPLATES_STORAGE_KEY = 'owenScenarioTemplates';
+const BRIDGE_PROTOCOL_VERSION = '2.0';
 
 chrome.runtime.onInstalled.addListener(() => {
   ensureCommandPolling();
@@ -81,7 +84,9 @@ async function pollForCommand() {
 
   pollInProgress = true;
   try {
-    const response = await fetch(`http://127.0.0.1:${options.port}/commands/next?waitMs=20000`, {
+    const hasRunnableJob = await hasRunnableBrowserJob();
+    const browserVersion = encodeURIComponent(chrome.runtime.getManifest().version);
+    const response = await fetch(`http://127.0.0.1:${options.port}/commands/next?waitMs=${hasRunnableJob ? 0 : 20000}&protocolVersion=${encodeURIComponent(BRIDGE_PROTOCOL_VERSION)}&browserVersion=${browserVersion}`, {
       method: 'GET',
       headers: { 'X-Owen-Bridge-Token': options.token }
     });
@@ -93,6 +98,8 @@ async function pollForCommand() {
     if (body.command) {
       const result = await executeBrowserCommand(body.command, options);
       await postCommandResult(options, result);
+    } else if (hasRunnableJob) {
+      await processNextBrowserJobStep();
     }
   } finally {
     pollInProgress = false;
@@ -207,6 +214,37 @@ function normalizeWorkflowSteps(steps) {
 }
 
 async function executeSingleAction(command, allowedHosts) {
+  const action = command.action ?? 'readPage';
+  const effectActions = new Set(['click', 'type', 'scroll', 'keyPress', 'selectOption', 'clearInput']);
+  const effectPolicy = effectActions.has(action) ? String(command.effectPolicy || 'observe') : 'none';
+  const before = effectPolicy === 'none' ? undefined : await collectActionEffectState(command).catch(() => undefined);
+  const result = await executeSingleActionCore(command, allowedHosts);
+  if (!before) {
+    return result;
+  }
+
+  await sleep(action === 'scroll' ? 350 : 150);
+  const after = await collectActionEffectState(command).catch(() => undefined);
+  if (!after) {
+    return result;
+  }
+
+  const changes = [];
+  if (before.tabId !== after.tabId) { changes.push('tab'); }
+  if (before.url !== after.url) { changes.push('url'); }
+  if (before.domHash !== after.domHash) { changes.push('dom'); }
+  if (before.scrollX !== after.scrollX || before.scrollY !== after.scrollY) { changes.push('scroll'); }
+  if (before.activeElement !== after.activeElement) { changes.push('focus'); }
+  if (before.targetState !== after.targetState) { changes.push('target'); }
+  const effect = { policy: effectPolicy, observed: changes.length > 0, changes, before, after };
+  if (effectPolicy === 'require' && !effect.observed) {
+    throw new Error(`Browser action produced no observable effect: ${action}`);
+  }
+
+  return result && typeof result === 'object' ? { ...result, effect } : { ok: true, result, effect };
+}
+
+async function executeSingleActionCore(command, allowedHosts) {
   const action = command.action ?? 'readPage';
 
   ensureOperatorConfirmed(command, action);
@@ -421,6 +459,22 @@ async function executeSingleAction(command, allowedHosts) {
 
   if (action === 'replayWorkflow') {
     return runReplayWorkflow(command, allowedHosts);
+  }
+
+  if (action === 'listScenarioTemplates') {
+    return runListScenarioTemplates();
+  }
+
+  if (action === 'saveScenarioTemplate') {
+    return runSaveScenarioTemplate(command);
+  }
+
+  if (action === 'deleteScenarioTemplate') {
+    return runDeleteScenarioTemplate(command);
+  }
+
+  if (action === 'exportScenarioTemplates') {
+    return runExportScenarioTemplates();
   }
 
   if (action === 'runScenarioTemplate') {
@@ -684,14 +738,32 @@ async function runRuntimeSnapshot(command, allowedHosts) {
         duration: Math.round(entry.duration)
       }));
       const nav = performance.getEntriesByType('navigation')[0];
+      const paints = performance.getEntriesByType('paint').map(entry => ({ name: entry.name, startTime: Math.round(entry.startTime) }));
+      const lcpEntries = performance.getEntriesByType('largest-contentful-paint');
+      const lcp = lcpEntries.length > 0 ? lcpEntries[lcpEntries.length - 1] : undefined;
+      const layoutShifts = performance.getEntriesByType('layout-shift').filter(entry => !entry.hadRecentInput);
+      const cls = layoutShifts.reduce((total, entry) => total + Number(entry.value || 0), 0);
+      const longTasks = performance.getEntriesByType('longtask');
       return {
         ok: true,
         url: location.href,
         title: document.title,
         navigation: nav ? {
+          timeToFirstByte: Math.round(nav.responseStart),
+          dns: Math.round(nav.domainLookupEnd - nav.domainLookupStart),
+          connection: Math.round(nav.connectEnd - nav.connectStart),
           domContentLoaded: Math.round(nav.domContentLoadedEventEnd),
           loadEventEnd: Math.round(nav.loadEventEnd)
         } : undefined,
+        webVitals: {
+          firstContentfulPaint: paints.find(entry => entry.name === 'first-contentful-paint')?.startTime,
+          largestContentfulPaint: lcp ? Math.round(lcp.startTime) : undefined,
+          cumulativeLayoutShift: Number(cls.toFixed(4)),
+          longTaskCount: longTasks.length,
+          longTaskTotalDuration: Math.round(longTasks.reduce((total, entry) => total + entry.duration, 0)),
+          longestTaskDuration: Math.round(Math.max(0, ...longTasks.map(entry => entry.duration)))
+        },
+        paints,
         resources,
         consoleSupport: 'Console log history is not persisted in MV3 runtime by default.'
       };
@@ -727,7 +799,7 @@ async function runDomDiffTimeline(command, allowedHosts) {
 async function runOcrSnapshot(command, allowedHosts) {
   const tab = await getActiveTab();
   assertAllowedUrl(tab.url, allowedHosts);
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  const captured = await captureVisibleTabWithRedaction(tab);
   const [{ result: hint }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: () => {
@@ -742,7 +814,8 @@ async function runOcrSnapshot(command, allowedHosts) {
     ok: true,
     ocrSupported: false,
     message: 'True OCR is not embedded in this runtime. Returned screenshot and DOM-based text hints instead.',
-    screenshotDataUrl: dataUrl,
+    screenshotDataUrl: captured.dataUrl,
+    screenshotRedaction: captured.redaction,
     hint
   };
 }
@@ -871,11 +944,12 @@ async function runCaptureElement(command, allowedHosts) {
     throw new Error(targetResult.error);
   }
 
-  const clipped = await captureRegionImage(tab.windowId, targetResult.region);
+  const clipped = await captureRegionImage(tab, targetResult.region);
   return {
     ok: true,
     screenshotDataUrl: clipped.dataUrl,
     screenshotMimeType: 'image/png',
+    screenshotRedaction: clipped.redaction,
     captureRegion: targetResult.region,
     captureTarget: targetResult.target
   };
@@ -905,11 +979,12 @@ async function runCaptureRegion(command, allowedHosts) {
     devicePixelRatio: metrics?.devicePixelRatio
   });
 
-  const clipped = await captureRegionImage(tab.windowId, region);
+  const clipped = await captureRegionImage(tab, region);
   return {
     ok: true,
     screenshotDataUrl: clipped.dataUrl,
     screenshotMimeType: 'image/png',
+    screenshotRedaction: clipped.redaction,
     captureRegion: region
   };
 }
@@ -1571,7 +1646,8 @@ async function runHighlightEvidence(command, allowedHosts) {
     throw new Error('highlightEvidence found no visible targets.');
   }
 
-  const fullDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  const captured = await captureVisibleTabWithRedaction(tab);
+  const fullDataUrl = captured.dataUrl;
   const blob = await fetch(fullDataUrl).then(response => response.blob());
   const bitmap = await createImageBitmap(blob);
   const dpr = Number(highlight.viewport?.devicePixelRatio) || 1;
@@ -1607,7 +1683,8 @@ async function runHighlightEvidence(command, allowedHosts) {
     highlightedCount: highlight.highlights.length,
     highlights: highlight.highlights,
     screenshotDataUrl: `data:image/png;base64,${arrayBufferToBase64(buffer)}`,
-    screenshotMimeType: 'image/png'
+    screenshotMimeType: 'image/png',
+    screenshotRedaction: captured.redaction
   };
 }
 
@@ -2508,29 +2585,38 @@ async function runStartBrowserJob(command, allowedHosts) {
   const stored = await chrome.storage.local.get(BROWSER_JOBS_STORAGE_KEY);
   const jobs = stored[BROWSER_JOBS_STORAGE_KEY] && typeof stored[BROWSER_JOBS_STORAGE_KEY] === 'object' ? stored[BROWSER_JOBS_STORAGE_KEY] : {};
   const steps = Array.isArray(command.steps) ? command.steps.slice(0, 30) : [];
+  if (steps.length === 0) {
+    throw new Error('startBrowserJob requires at least one step.');
+  }
   const job = {
     jobName,
-    status: 'running',
+    status: 'queued',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     stepCount: steps.length,
+    nextStepIndex: 0,
+    steps,
+    allowedHosts,
+    commandDefaults: {
+      timeoutMs: command.timeoutMs,
+      retries: command.retries,
+      retryProfile: command.retryProfile,
+      autoHeal: command.autoHeal,
+      selectorMemory: command.selectorMemory,
+      effectPolicy: command.effectPolicy
+    },
     results: []
   };
   jobs[jobName] = job;
-  await chrome.storage.local.set({ [BROWSER_JOBS_STORAGE_KEY]: jobs });
-
-  for (const step of steps) {
-    if (jobs[jobName]?.status === 'cancelled') {
-      break;
+  const jobNames = Object.keys(jobs);
+  for (const staleName of jobNames.slice(0, Math.max(0, jobNames.length - 50))) {
+    if (!['queued', 'running'].includes(jobs[staleName]?.status)) {
+      delete jobs[staleName];
     }
-    const result = await executeSingleAction({ ...command, ...step, action: step.action ?? 'readPage' }, allowedHosts);
-    job.results.push({ action: step.action ?? 'readPage', result });
   }
-  job.status = job.results.length === steps.length ? 'completed' : 'cancelled';
-  job.updatedAt = new Date().toISOString();
-  jobs[jobName] = job;
   await chrome.storage.local.set({ [BROWSER_JOBS_STORAGE_KEY]: jobs });
-  return { ok: true, job };
+  scheduleCommandPoll(0);
+  return { ok: true, job: publicBrowserJob(job) };
 }
 
 async function runGetBrowserJob(command) {
@@ -2540,7 +2626,7 @@ async function runGetBrowserJob(command) {
   if (!job) {
     throw new Error(`Browser job not found: ${command.jobName}`);
   }
-  return { ok: true, job };
+  return { ok: true, job: publicBrowserJob(job) };
 }
 
 async function runCancelBrowserJob(command) {
@@ -2555,7 +2641,63 @@ async function runCancelBrowserJob(command) {
   job.updatedAt = new Date().toISOString();
   jobs[jobName] = job;
   await chrome.storage.local.set({ [BROWSER_JOBS_STORAGE_KEY]: jobs });
-  return { ok: true, job };
+  return { ok: true, job: publicBrowserJob(job) };
+}
+
+async function hasRunnableBrowserJob() {
+  const stored = await chrome.storage.local.get(BROWSER_JOBS_STORAGE_KEY);
+  const jobs = stored[BROWSER_JOBS_STORAGE_KEY] && typeof stored[BROWSER_JOBS_STORAGE_KEY] === 'object' ? stored[BROWSER_JOBS_STORAGE_KEY] : {};
+  return Object.values(jobs).some(job => job && ['queued', 'running'].includes(job.status));
+}
+
+async function processNextBrowserJobStep() {
+  const stored = await chrome.storage.local.get(BROWSER_JOBS_STORAGE_KEY);
+  const jobs = stored[BROWSER_JOBS_STORAGE_KEY] && typeof stored[BROWSER_JOBS_STORAGE_KEY] === 'object' ? stored[BROWSER_JOBS_STORAGE_KEY] : {};
+  const job = Object.values(jobs).find(candidate => candidate && ['queued', 'running'].includes(candidate.status));
+  if (!job) {
+    return false;
+  }
+
+  const current = jobs[job.jobName];
+  const step = current.steps?.[current.nextStepIndex];
+  if (!step) {
+    current.status = 'completed';
+    current.updatedAt = new Date().toISOString();
+    await chrome.storage.local.set({ [BROWSER_JOBS_STORAGE_KEY]: jobs });
+    return true;
+  }
+
+  current.status = 'running';
+  current.updatedAt = new Date().toISOString();
+  await chrome.storage.local.set({ [BROWSER_JOBS_STORAGE_KEY]: jobs });
+  try {
+    const result = await executeSingleAction({ ...current.commandDefaults, ...step, action: step.action ?? 'readPage' }, current.allowedHosts || []);
+    const refreshed = await chrome.storage.local.get(BROWSER_JOBS_STORAGE_KEY);
+    const latestJobs = refreshed[BROWSER_JOBS_STORAGE_KEY] && typeof refreshed[BROWSER_JOBS_STORAGE_KEY] === 'object' ? refreshed[BROWSER_JOBS_STORAGE_KEY] : jobs;
+    const latest = latestJobs[current.jobName] || current;
+    if (latest.status === 'cancelled') {
+      return true;
+    }
+    latest.results = Array.isArray(latest.results) ? latest.results : [];
+    latest.results.push({ action: step.action ?? 'readPage', result });
+    latest.nextStepIndex += 1;
+    latest.status = latest.nextStepIndex >= latest.stepCount ? 'completed' : 'queued';
+    latest.updatedAt = new Date().toISOString();
+    latestJobs[current.jobName] = latest;
+    await chrome.storage.local.set({ [BROWSER_JOBS_STORAGE_KEY]: latestJobs });
+  } catch (error) {
+    current.status = 'failed';
+    current.error = String(error?.message ?? error);
+    current.updatedAt = new Date().toISOString();
+    jobs[current.jobName] = current;
+    await chrome.storage.local.set({ [BROWSER_JOBS_STORAGE_KEY]: jobs });
+  }
+  return true;
+}
+
+function publicBrowserJob(job) {
+  const { steps, allowedHosts, commandDefaults, ...summary } = job;
+  return summary;
 }
 
 async function runWaitPreset(command, allowedHosts) {
@@ -3109,7 +3251,7 @@ async function runScenarioTemplate(command, allowedHosts) {
     throw new Error('runScenarioTemplate requires scenarioName.');
   }
 
-  const templates = buildScenarioTemplateRegistry(command.scenarioTemplates);
+  const templates = await buildScenarioTemplateRegistry(command.scenarioTemplates);
   const template = templates[scenarioName];
   if (!template || !Array.isArray(template.steps) || template.steps.length === 0) {
     const available = Object.keys(templates).sort().join(', ');
@@ -3146,13 +3288,19 @@ async function runScenarioTemplate(command, allowedHosts) {
   };
 }
 
-function buildScenarioTemplateRegistry(customTemplates) {
+async function buildScenarioTemplateRegistry(customTemplates) {
   const registry = { ...SCENARIO_TEMPLATE_REGISTRY };
-  if (!customTemplates || typeof customTemplates !== 'object' || Array.isArray(customTemplates)) {
-    return registry;
-  }
+  const stored = await chrome.storage.local.get(SCENARIO_TEMPLATES_STORAGE_KEY);
+  mergeScenarioTemplateRegistry(registry, stored[SCENARIO_TEMPLATES_STORAGE_KEY], 'stored');
+  mergeScenarioTemplateRegistry(registry, customTemplates, 'request');
+  return registry;
+}
 
-  for (const [name, template] of Object.entries(customTemplates)) {
+function mergeScenarioTemplateRegistry(registry, templates, source) {
+  if (!templates || typeof templates !== 'object' || Array.isArray(templates)) {
+    return;
+  }
+  for (const [name, template] of Object.entries(templates)) {
     if (!name || !template || typeof template !== 'object' || Array.isArray(template)) {
       continue;
     }
@@ -3162,12 +3310,69 @@ function buildScenarioTemplateRegistry(customTemplates) {
         product: typeof template.product === 'string' ? template.product : undefined,
         description: typeof template.description === 'string' ? template.description : 'Custom scenario template.',
         defaults: template.defaults && typeof template.defaults === 'object' ? template.defaults : {},
-        steps: template.steps.slice(0, 40)
+        steps: template.steps.slice(0, 40),
+        templateVersion: typeof template.templateVersion === 'string' ? template.templateVersion : '1.0.0',
+        source
       };
     }
   }
+}
 
-  return registry;
+async function runListScenarioTemplates() {
+  const templates = await buildScenarioTemplateRegistry();
+  const items = Object.entries(templates).map(([name, template]) => ({
+    name,
+    category: template.category || 'custom',
+    product: template.product,
+    description: template.description,
+    templateVersion: template.templateVersion || 'builtin',
+    source: template.source || 'builtin',
+    stepCount: Array.isArray(template.steps) ? template.steps.length : 0
+  }));
+  return { ok: true, templateCount: items.length, templates: items.sort((left, right) => left.name.localeCompare(right.name)) };
+}
+
+async function runSaveScenarioTemplate(command) {
+  const scenarioName = String(command.scenarioName || '').trim();
+  const definition = command.scenarioTemplates?.[scenarioName];
+  if (!definition || typeof definition !== 'object' || !Array.isArray(definition.steps) || definition.steps.length === 0) {
+    throw new Error('saveScenarioTemplate requires scenarioTemplates[scenarioName] with at least one step.');
+  }
+  const stored = await chrome.storage.local.get(SCENARIO_TEMPLATES_STORAGE_KEY);
+  const templates = stored[SCENARIO_TEMPLATES_STORAGE_KEY] && typeof stored[SCENARIO_TEMPLATES_STORAGE_KEY] === 'object'
+    ? stored[SCENARIO_TEMPLATES_STORAGE_KEY]
+    : {};
+  templates[scenarioName] = {
+    category: String(definition.category || 'custom'),
+    product: typeof definition.product === 'string' ? definition.product : undefined,
+    description: typeof definition.description === 'string' ? definition.description : 'Custom scenario template.',
+    defaults: definition.defaults && typeof definition.defaults === 'object' ? definition.defaults : {},
+    steps: definition.steps.slice(0, 40),
+    templateVersion: String(command.templateVersion || definition.templateVersion || '1.0.0').slice(0, 40),
+    updatedAt: new Date().toISOString()
+  };
+  await chrome.storage.local.set({ [SCENARIO_TEMPLATES_STORAGE_KEY]: templates });
+  return { ok: true, scenarioName, templateVersion: templates[scenarioName].templateVersion, stepCount: templates[scenarioName].steps.length };
+}
+
+async function runDeleteScenarioTemplate(command) {
+  const scenarioName = String(command.scenarioName || '').trim();
+  const stored = await chrome.storage.local.get(SCENARIO_TEMPLATES_STORAGE_KEY);
+  const templates = stored[SCENARIO_TEMPLATES_STORAGE_KEY] && typeof stored[SCENARIO_TEMPLATES_STORAGE_KEY] === 'object'
+    ? stored[SCENARIO_TEMPLATES_STORAGE_KEY]
+    : {};
+  const deleted = Boolean(templates[scenarioName]);
+  delete templates[scenarioName];
+  await chrome.storage.local.set({ [SCENARIO_TEMPLATES_STORAGE_KEY]: templates });
+  return { ok: true, scenarioName, deleted };
+}
+
+async function runExportScenarioTemplates() {
+  const stored = await chrome.storage.local.get(SCENARIO_TEMPLATES_STORAGE_KEY);
+  const templates = stored[SCENARIO_TEMPLATES_STORAGE_KEY] && typeof stored[SCENARIO_TEMPLATES_STORAGE_KEY] === 'object'
+    ? stored[SCENARIO_TEMPLATES_STORAGE_KEY]
+    : {};
+  return { ok: true, exportedAt: new Date().toISOString(), formatVersion: '1.0', templates };
 }
 
 function buildScenarioTemplateParams(command, scenarioName, template) {
@@ -3308,6 +3513,57 @@ async function collectDomFingerprint(tabId) {
   });
 
   return result ?? { hash: 'h0', textLength: 0, headings: 0 };
+}
+
+async function collectActionEffectState(command) {
+  const tab = await getActiveTab();
+  if (!hasTabId(tab)) {
+    return undefined;
+  }
+
+  const fingerprint = await collectDomFingerprint(tab.id);
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: input => {
+      const normalize = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+      let target;
+      if (input.selector) {
+        target = document.querySelector(input.selector);
+      } else if (input.text || input.label) {
+        const intent = normalize(input.text || input.label).toLowerCase();
+        target = Array.from(document.querySelectorAll('button,a,input,textarea,select,[role="button"],[role="tab"],[role="menuitem"]'))
+          .find(element => normalize(element.innerText || element.value || element.getAttribute('aria-label') || element.getAttribute('title')).toLowerCase().includes(intent));
+      }
+
+      const active = document.activeElement;
+      const activeElement = active ? [active.tagName, active.id, active.getAttribute('name'), active.getAttribute('aria-label')].filter(Boolean).join('|') : '';
+      const targetState = target ? JSON.stringify({
+        value: 'value' in target ? target.value : undefined,
+        checked: 'checked' in target ? target.checked : undefined,
+        selectedIndex: 'selectedIndex' in target ? target.selectedIndex : undefined,
+        ariaSelected: target.getAttribute('aria-selected'),
+        ariaExpanded: target.getAttribute('aria-expanded'),
+        text: normalize(target.innerText || target.textContent).slice(0, 500)
+      }) : '';
+      return {
+        scrollX: Math.round(window.scrollX),
+        scrollY: Math.round(window.scrollY),
+        activeElement,
+        targetState
+      };
+    },
+    args: [command]
+  });
+
+  return {
+    tabId: tab.id,
+    url: tab.url,
+    domHash: fingerprint.hash,
+    scrollX: result?.scrollX ?? 0,
+    scrollY: result?.scrollY ?? 0,
+    activeElement: result?.activeElement ?? '',
+    targetState: result?.targetState ?? ''
+  };
 }
 
 async function runJourneyCapture(command, allowedHosts) {
@@ -3536,7 +3792,8 @@ function extractScreenshotOverride(executionTrail) {
         pageMetadata: {
           action: executionTrail[i]?.action,
           captureRegion: result.captureRegion,
-          captureTarget: result.captureTarget
+          captureTarget: result.captureTarget,
+          screenshotRedaction: result.screenshotRedaction
         }
       };
     }
@@ -3644,10 +3901,14 @@ async function captureCurrentTab() {
   });
 
   let screenshot;
+  let screenshotRedaction;
   if (options.includeScreenshot) {
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-    screenshot = { dataUrl, mimeType: 'image/png' };
+    const captured = await captureVisibleTabWithRedaction(tab, options.screenshotRedaction);
+    screenshot = { dataUrl: captured.dataUrl, mimeType: 'image/png' };
+    screenshotRedaction = captured.redaction;
   }
+
+  pageSnapshot.metadata = { ...pageSnapshot.metadata, screenshotRedaction };
 
   const payload = {
     source: 'owen-browser-capture',
@@ -3689,12 +3950,16 @@ async function createCapturePayload(tab, command, options, screenshotOverride) {
   });
 
   let screenshot;
+  let screenshotRedaction = screenshotOverride?.pageMetadata?.screenshotRedaction;
   if (screenshotOverride?.dataUrl) {
     screenshot = { dataUrl: screenshotOverride.dataUrl, mimeType: screenshotOverride.mimeType || 'image/png' };
   } else if (includeScreenshot) {
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-    screenshot = { dataUrl, mimeType: 'image/png' };
+    const captured = await captureVisibleTabWithRedaction(tab, options.screenshotRedaction);
+    screenshot = { dataUrl: captured.dataUrl, mimeType: 'image/png' };
+    screenshotRedaction = captured.redaction;
   }
+
+  pageSnapshot.metadata = { ...pageSnapshot.metadata, screenshotRedaction };
 
   if (screenshotOverride?.pageMetadata && pageSnapshot?.metadata && typeof pageSnapshot.metadata === 'object') {
     pageSnapshot.metadata = {
@@ -4303,8 +4568,16 @@ function normalizeAllowedHost(entry) {
 }
 
 async function getOptions() {
-  const stored = await chrome.storage.sync.get(DEFAULT_OPTIONS);
-  return { ...DEFAULT_OPTIONS, ...stored };
+  const [syncedOptions, localSecrets] = await Promise.all([
+    chrome.storage.sync.get(DEFAULT_OPTIONS),
+    chrome.storage.local.get('token')
+  ]);
+  const token = localSecrets.token || syncedOptions.token || '';
+  if (!localSecrets.token && syncedOptions.token) {
+    await chrome.storage.local.set({ token: syncedOptions.token });
+    await chrome.storage.sync.remove('token');
+  }
+  return { ...DEFAULT_OPTIONS, ...syncedOptions, token };
 }
 
 function collectPageSnapshot(includeHtml) {
@@ -4720,8 +4993,9 @@ function normalizeCaptureRegion(input) {
   };
 }
 
-async function captureRegionImage(windowId, region) {
-  const fullDataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+async function captureRegionImage(tab, region) {
+  const captured = await captureVisibleTabWithRedaction(tab);
+  const fullDataUrl = captured.dataUrl;
   const blob = await fetch(fullDataUrl).then(response => response.blob());
   const bitmap = await createImageBitmap(blob);
   const dpr = Number(region?.devicePixelRatio) || 1;
@@ -4742,8 +5016,83 @@ async function captureRegionImage(windowId, region) {
   const clippedBlob = await canvas.convertToBlob({ type: 'image/png' });
   const buffer = await clippedBlob.arrayBuffer();
   return {
-    dataUrl: `data:image/png;base64,${arrayBufferToBase64(buffer)}`
+    dataUrl: `data:image/png;base64,${arrayBufferToBase64(buffer)}`,
+    redaction: captured.redaction
   };
+}
+
+async function captureVisibleTabWithRedaction(tab, requestedProfile) {
+  const options = requestedProfile ? undefined : await getOptions();
+  const configuredProfile = requestedProfile || options?.screenshotRedaction;
+  const profile = ['off', 'standard', 'strict'].includes(configuredProfile) ? configuredProfile : 'standard';
+  if (profile === 'off' || !hasTabId(tab)) {
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    return { dataUrl, redaction: { profile, applied: false, maskedRegionCount: 0 } };
+  }
+
+  const marker = `owen-redact-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  let maskedRegionCount = 0;
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: applyScreenshotRedactionOnPage,
+      args: [profile, marker]
+    });
+    maskedRegionCount = Number(result?.maskedRegionCount) || 0;
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    return { dataUrl, redaction: { profile, applied: maskedRegionCount > 0, maskedRegionCount } };
+  } finally {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: restoreScreenshotRedactionOnPage,
+      args: [marker]
+    }).catch(() => undefined);
+  }
+}
+
+function applyScreenshotRedactionOnPage(profile, marker) {
+  const selectors = [
+    'input[type="password"]',
+    'input[type="email"]',
+    'input[name*="token" i]',
+    'input[name*="secret" i]',
+    '[data-sensitive]',
+    '[data-redact]'
+  ];
+  if (profile === 'strict') {
+    selectors.push('input', 'textarea', '[contenteditable="true"]');
+  }
+
+  const targets = new Set();
+  for (const selector of selectors) {
+    for (const element of document.querySelectorAll(selector)) {
+      targets.add(element);
+    }
+  }
+  if (profile === 'strict') {
+    const sensitiveText = /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b)/i;
+    for (const element of document.querySelectorAll('body *')) {
+      if (element.children.length === 0 && sensitiveText.test(element.textContent || '')) {
+        targets.add(element);
+      }
+    }
+  }
+
+  for (const element of targets) {
+    element.setAttribute('data-owen-redaction-marker', marker);
+    element.setAttribute('data-owen-redaction-filter', element.style.filter || '');
+    element.style.filter = 'blur(10px)';
+  }
+  return { maskedRegionCount: targets.size };
+}
+
+function restoreScreenshotRedactionOnPage(marker) {
+  const selector = `[data-owen-redaction-marker="${CSS.escape(marker)}"]`;
+  for (const element of document.querySelectorAll(selector)) {
+    element.style.filter = element.getAttribute('data-owen-redaction-filter') || '';
+    element.removeAttribute('data-owen-redaction-filter');
+    element.removeAttribute('data-owen-redaction-marker');
+  }
 }
 
 function arrayBufferToBase64(buffer) {

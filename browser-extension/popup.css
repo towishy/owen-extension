@@ -70,7 +70,8 @@ label {
 
 input[type="number"],
 input[type="password"],
-input[type="text"] {
+input[type="text"],
+select {
   box-sizing: border-box;
   width: 100%;
   border: 1px solid var(--line);

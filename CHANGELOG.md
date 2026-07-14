@@ -6,6 +6,19 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-07-14
+
+- Added expiring browser commands, queue size limits, timeout removal, late-result metrics, and protocol/version health metadata.
+- Moved the browser pairing token from synced storage to local storage with automatic migration.
+- Added screenshot redaction profiles that blur sensitive fields and strict-mode identity/network values before PNG capture.
+- Added `effectPolicy` to observe or require URL, DOM, scroll, focus, or target-state changes after interactive actions.
+- Changed browser jobs into persisted, cancellable, stepwise jobs that resume through the polling loop.
+- Added a global capture catalog, `search_browser_captures`, and opt-in age/count retention settings.
+- Added a typed action registry plus compact read, interact, workflow, evidence, and admin LM tools while retaining `browser_act` compatibility.
+- Added persisted, versioned scenario template list/save/delete/export actions.
+- Expanded `runtimeSnapshot` with navigation timing, paint, LCP, CLS, and long-task metrics.
+- Replaced the sample test with command queue, action schema, redaction, and allowed-host policy coverage.
+
 ## [0.1.25] - 2026-07-14
 
 - Changed the browser extension into a passive paired agent controlled from VS Code.

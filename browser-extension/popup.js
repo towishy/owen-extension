@@ -4,7 +4,8 @@ const DEFAULT_OPTIONS = {
   investigationName: '',
   commandPolling: true,
   includeHtml: false,
-  includeScreenshot: true
+  includeScreenshot: true,
+  screenshotRedaction: 'standard'
 };
 
 const elements = {
@@ -14,6 +15,7 @@ const elements = {
   commandPolling: document.getElementById('commandPolling'),
   includeHtml: document.getElementById('includeHtml'),
   includeScreenshot: document.getElementById('includeScreenshot'),
+  screenshotRedaction: document.getElementById('screenshotRedaction'),
   save: document.getElementById('save'),
   status: document.getElementById('status')
 };
@@ -26,24 +28,39 @@ elements.save.addEventListener('click', async () => {
 });
 
 async function loadOptions() {
-  const options = await chrome.storage.sync.get(DEFAULT_OPTIONS);
+  const [syncedOptions, localSecrets] = await Promise.all([
+    chrome.storage.sync.get(DEFAULT_OPTIONS),
+    chrome.storage.local.get('token')
+  ]);
+  const token = localSecrets.token || syncedOptions.token || '';
+  if (!localSecrets.token && syncedOptions.token) {
+    await chrome.storage.local.set({ token: syncedOptions.token });
+    await chrome.storage.sync.remove('token');
+  }
+  const options = { ...syncedOptions, token };
   elements.port.value = String(options.port);
   elements.token.value = options.token;
   elements.investigationName.value = options.investigationName;
   elements.commandPolling.checked = options.commandPolling;
   elements.includeHtml.checked = options.includeHtml;
   elements.includeScreenshot.checked = options.includeScreenshot;
+  elements.screenshotRedaction.value = options.screenshotRedaction;
 }
 
 async function saveOptions() {
-  await chrome.storage.sync.set({
+  const token = elements.token.value.trim();
+  await Promise.all([
+    chrome.storage.local.set({ token }),
+    chrome.storage.sync.set({
     port: Number(elements.port.value || DEFAULT_OPTIONS.port),
-    token: elements.token.value.trim(),
     investigationName: elements.investigationName.value.trim(),
     commandPolling: elements.commandPolling.checked,
     includeHtml: elements.includeHtml.checked,
-    includeScreenshot: elements.includeScreenshot.checked
-  });
+    includeScreenshot: elements.includeScreenshot.checked,
+    screenshotRedaction: elements.screenshotRedaction.value
+    }),
+    chrome.storage.sync.remove('token')
+  ]);
   await chrome.runtime.sendMessage({ type: 'wake-command-polling' });
 }
 

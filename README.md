@@ -11,6 +11,18 @@ Chrome / Edge extension
 
 The initial target is Defender, Entra, Azure portal, and similar security investigation pages where the browser has context that Copilot cannot otherwise inspect directly.
 
+## New in 0.1.26
+
+- Browser commands now expire, leave the queue on timeout, respect a configurable queue limit, and report lifecycle metrics from `/health`.
+- Pairing tokens are stored in browser-local storage instead of browser-sync storage; existing tokens migrate automatically.
+- PNG captures support `standard`, `strict`, and `off` screenshot redaction. Standard masks secret/email fields; strict also masks inputs and visible email, IP, and GUID values.
+- Interactive actions support `effectPolicy: none | observe | require` to identify clicks, typing, scrolling, and selections that produced no observable page effect.
+- Browser jobs run one persisted step at a time so cancellation can be delivered between steps and interrupted jobs can continue after service-worker recovery.
+- `#searchBrowserCaptures` searches a global local catalog. Optional age/count retention keeps large capture stores bounded.
+- Compact `#browserRead`, `#browserInteract`, `#browserWorkflow`, `#browserEvidence`, and `#browserAdmin` tools reduce action-schema overhead; `#browserAct` remains compatible.
+- Versioned scenario templates can be listed, saved, deleted, exported, and reused from browser-local storage.
+- `runtimeSnapshot` now includes navigation timing, paint, LCP, CLS, and long-task metrics.
+
 ## New in 0.1.25
 
 - The browser extension now acts as a passive paired agent. After one-time setup, VS Code controls the active tab through `#browserAct`; opening the popup or manually sending a tab is not required.
@@ -136,7 +148,7 @@ git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-exte
 Set-Location C:\OWEN\github\owen-extension
 npm install
 npm run package
-code --install-extension .\owen-browser-bridge-0.1.25.vsix --force
+code --install-extension .\owen-browser-bridge-0.1.26.vsix --force
 ```
 
 macOS terminal:
@@ -146,7 +158,7 @@ git clone https://github.com/towishy/owen-extension.git ~/github/owen-extension
 cd ~/github/owen-extension
 npm install
 npm run package
-code --install-extension ./owen-browser-bridge-0.1.25.vsix --force
+code --install-extension ./owen-browser-bridge-0.1.26.vsix --force
 ```
 
 If the `code` command is not available, open VS Code, run `Shell Command: Install 'code' command in PATH`, then rerun the install command.
@@ -236,7 +248,9 @@ The VS Code extension contributes these Language Model Tools:
 - `#getBrowserState`: returns the latest shared browser session, active tab, capture paths, and structured `screenSummary`
 - `#readBrowserCapture`: returns a capture by id, Markdown path, or JSON path
 - `#readBrowserCaptureGroup`: returns every capture in a host or investigation group for correlation
-- `#browserAct`: sends a safe action to the paired browser and returns the resulting page state
+- `#searchBrowserCaptures`: searches the global local capture catalog by text, host, group, and date
+- `#browserRead`, `#browserInteract`, `#browserWorkflow`, `#browserEvidence`, `#browserAdmin`: compact category-specific action tools
+- `#browserAct`: compatibility tool exposing every browser action and input
 
 Example Copilot prompts:
 
@@ -270,9 +284,9 @@ For paired browser control on allowed hosts:
 
 Supported actions are `readPage`, `capture`, `navigate`, `click`, `type`, and `waitForText`. `readPage` returns a structured `screenSummary` with headings, landmarks, interactables, form fields, tables, viewport, text sample, and capture quality. Browser actions are delivered through the local paired extension, restricted by **Allowed Hosts**, and capture the resulting page by default.
 
-Advanced actions are also available: `wait`, `waitPreset`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `visualAssert`, `accessibilitySnapshot`, `mapForm`, `watchPageChanges`, `highlightEvidence`, `planAndRun`, `evidenceClaimCheck`, `tableWatchAndDiff`, `browserRunBundle`, `safeActionPreview`, `stableTargetProfile`, `guidedDrilldown`, `evidenceCompletenessCheck`, `failureExplainer`, `waitProfiler`, `automationHealthScore`, `sensitiveActionGuard`, `tabOrchestrator`, `popupGuard`, `returnToTab`, `tabRunSummary`, `buildEvidencePack`, `buildNavigationGraph`, `assertPageContract`, `createHandoff`, `selectorHealthReport`, `captureReviewQueue`, `startBrowserJob`, `getBrowserJob`, `cancelBrowserJob`, `recordWorkflow`, `replayWorkflow`, `runScenarioTemplate`, `resumeAfterAuth`, and `runWorkflow`.
+Advanced actions are also available: `wait`, `waitPreset`, `scroll`, `hover`, `keyPress`, `selectOption`, `clearInput`, `listInteractables`, `inspectTargets`, `captureElement`, `captureRegion`, `back`, `forward`, `reload`, `openInNewTab`, `switchTab`, `closeTab`, `journeyCapture`, `paginateCapture`, `smartFormFill`, `conditionalWorkflow`, `multiTabCrawl`, `runtimeSnapshot`, `domDiffTimeline`, `ocrSnapshot`, `dataGapGuard`, `exportReplay`, `networkTraceCapture`, `safeDownloadAndHash`, `tableExtract`, `stateCheckpoint`, `rollbackToCheckpoint`, `humanReviewGate`, `bulkActionFromList`, `semanticWait`, `compareCaptureRuns`, `policyGuard`, `visualAssert`, `accessibilitySnapshot`, `mapForm`, `watchPageChanges`, `highlightEvidence`, `planAndRun`, `evidenceClaimCheck`, `tableWatchAndDiff`, `browserRunBundle`, `safeActionPreview`, `stableTargetProfile`, `guidedDrilldown`, `evidenceCompletenessCheck`, `failureExplainer`, `waitProfiler`, `automationHealthScore`, `sensitiveActionGuard`, `tabOrchestrator`, `popupGuard`, `returnToTab`, `tabRunSummary`, `buildEvidencePack`, `buildNavigationGraph`, `assertPageContract`, `createHandoff`, `selectorHealthReport`, `captureReviewQueue`, `startBrowserJob`, `getBrowserJob`, `cancelBrowserJob`, `recordWorkflow`, `replayWorkflow`, `listScenarioTemplates`, `saveScenarioTemplate`, `deleteScenarioTemplate`, `exportScenarioTemplates`, `runScenarioTemplate`, `resumeAfterAuth`, and `runWorkflow`.
 
-`#browserAct` supports `preset`, `steps`, `goal`, `claim`, `requiredClaims`, `retries`, `retryProfile`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `selectorMemory`, `targetHint`, `targetScope`, `frameDepth`, `captureBeforeAfter`, `assertText`, `assertNoText`, `assertSelector`, `assertNotSelector`, `assertScreenshotChanged`, `watchDurationMs`, `highlightSelectors`, `highlightText`, `waitPreset`, `waitCandidates`, `contractName`, `contractSelectors`, `contractTexts`, `captureGroup`, `jobName`, `scenarioName`, `scenarioTemplates`, `tabRoles`, `expectedTabs`, `returnToRole`, `closeExtraTabs`, `onUnexpectedTab`, `keyColumns`, `detailSelector`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `macroName`, `params`, `baseRunId`, and `policyProfile` so Copilot can run resilient workflows, inspect ranked visual/accessibility targets, preview actions, profile stable targets, orchestrate browser tabs and popups, drill into matching rows, capture element/region evidence, form automation, conditional branching, runtime snapshots, gap detection, failure explanation, wait profiling, automation health scoring, sensitive action guarding, replay export, network traces, table extraction, table diffing, claim checking, evidence completeness checks, checkpoint rollback, manual review gates, policy checks, visual assertions, page watching, evidence highlighting, evidence pack building, navigation graphing, browser run bundling, contract checks, handoff reports, selector health reports, reusable scenario templates, and reusable macro playback.
+`#browserAct` supports `preset`, `steps`, `goal`, `claim`, `requiredClaims`, `retries`, `retryProfile`, `effectPolicy`, `fallbackSelectors`, `fallbackTexts`, `autoHeal`, `selectorMemory`, `targetHint`, `targetScope`, `frameDepth`, `captureBeforeAfter`, `assertText`, `assertNoText`, `assertSelector`, `assertNotSelector`, `assertScreenshotChanged`, `watchDurationMs`, `highlightSelectors`, `highlightText`, `waitPreset`, `waitCandidates`, `contractName`, `contractSelectors`, `contractTexts`, `captureGroup`, `jobName`, `scenarioName`, `scenarioTemplates`, `templateVersion`, `tabRoles`, `expectedTabs`, `returnToRole`, `closeExtraTabs`, `onUnexpectedTab`, `keyColumns`, `detailSelector`, `regionX`, `regionY`, `regionWidth`, `regionHeight`, `regionPadding`, `urls`, `maxPages`, `maxTabs`, `nextSelector`, `nextText`, `extractSelectors`, `formFields`, `conditions`, `requiredFields`, `requiredTexts`, `acknowledgement`, `urlIncludes`, `tableSelector`, `checkpointName`, `approvalKeyword`, `itemSelector`, `semanticConditions`, `macroName`, `params`, `baseRunId`, and `policyProfile`.
 
 Example: run scenario templates
 
@@ -367,7 +381,7 @@ Example: assert the UI state after an action
 #browserAct { "action": "visualAssert", "assertText": "READY_MARKER", "assertSelector": "#data-table", "captureAfter": false } verify the current page is ready before collecting evidence.
 ```
 
-To inspect recent automation evidence, run `Owen Browser Bridge: Show Action Trace` from the VS Code Command Palette. Capture redaction can be adjusted with `owenBrowserBridge.redactionProfile` and `owenBrowserBridge.customRedactionPatterns`.
+To inspect recent automation evidence, run `Owen Browser Bridge: Show Action Trace` from the VS Code Command Palette. Text redaction uses `owenBrowserBridge.redactionProfile` and `owenBrowserBridge.customRedactionPatterns`. Screenshot redaction is selected in the browser popup and defaults to `standard`. Capture retention is disabled by default; set `owenBrowserBridge.captureRetentionDays` or `owenBrowserBridge.captureRetentionMaxItems` to opt in. Queue capacity is controlled by `owenBrowserBridge.commandQueueMaxSize`.
 
 `wait.kind` additionally supports `networkIdle` and `requestDone` so workflows can wait for API/resource completion patterns.
 

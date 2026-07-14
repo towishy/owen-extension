@@ -3,6 +3,10 @@ import { promises as fs } from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { BROWSER_ACTIONS, getBrowserActionDefinition, type BrowserAction, type BrowserActionCategory } from './browser-actions';
+import { ExpiringCommandQueue } from './command-queue';
+import { isAllowedHost, normalizeAllowedHost } from './host-policy';
+import { redactSensitiveText, type RedactionProfile } from './redaction';
 
 type BrowserCapturePayload = {
 	source?: string;
@@ -68,6 +72,15 @@ type CaptureGroupSummary = {
 		to: string;
 	};
 	captures: StoredCapture[];
+};
+
+type CaptureSearchInput = {
+	query?: string;
+	host?: string;
+	group?: string;
+	from?: string;
+	to?: string;
+	limit?: number;
 };
 
 type BrowserWaitCondition = {
@@ -156,10 +169,12 @@ type BrowserStepInput = {
 	frameDepth?: number;
 	retryProfile?: 'conservative' | 'standard' | 'aggressive';
 	captureBeforeAfter?: boolean;
+	effectPolicy?: 'none' | 'observe' | 'require';
 	macroName?: string;
 	params?: Record<string, unknown>;
 	scenarioName?: string;
 	scenarioTemplates?: Record<string, unknown>;
+	templateVersion?: string;
 	steps?: BrowserStepInput[];
 	assertText?: string;
 	assertNoText?: string;
@@ -191,86 +206,6 @@ type BrowserStepInput = {
 
 type BrowserPreset = 'defenderIncidentSurvey' | 'defenderIncidentAlerts' | 'defenderIncidentEvidence';
 
-type BrowserAction =
-	| 'readPage'
-	| 'capture'
-	| 'click'
-	| 'type'
-	| 'navigate'
-	| 'waitForText'
-	| 'wait'
-	| 'waitPreset'
-	| 'scroll'
-	| 'hover'
-	| 'keyPress'
-	| 'selectOption'
-	| 'clearInput'
-	| 'back'
-	| 'forward'
-	| 'reload'
-	| 'openInNewTab'
-	| 'switchTab'
-	| 'closeTab'
-	| 'listInteractables'
-	| 'inspectTargets'
-	| 'captureElement'
-	| 'captureRegion'
-	| 'journeyCapture'
-	| 'paginateCapture'
-	| 'smartFormFill'
-	| 'conditionalWorkflow'
-	| 'multiTabCrawl'
-	| 'runtimeSnapshot'
-	| 'domDiffTimeline'
-	| 'ocrSnapshot'
-	| 'dataGapGuard'
-	| 'exportReplay'
-	| 'networkTraceCapture'
-	| 'safeDownloadAndHash'
-	| 'tableExtract'
-	| 'stateCheckpoint'
-	| 'rollbackToCheckpoint'
-	| 'humanReviewGate'
-	| 'bulkActionFromList'
-	| 'semanticWait'
-	| 'compareCaptureRuns'
-	| 'policyGuard'
-	| 'visualAssert'
-	| 'accessibilitySnapshot'
-	| 'mapForm'
-	| 'watchPageChanges'
-	| 'highlightEvidence'
-	| 'planAndRun'
-	| 'evidenceClaimCheck'
-	| 'tableWatchAndDiff'
-	| 'browserRunBundle'
-	| 'safeActionPreview'
-	| 'stableTargetProfile'
-	| 'guidedDrilldown'
-	| 'evidenceCompletenessCheck'
-	| 'failureExplainer'
-	| 'waitProfiler'
-	| 'automationHealthScore'
-	| 'sensitiveActionGuard'
-	| 'tabOrchestrator'
-	| 'popupGuard'
-	| 'returnToTab'
-	| 'tabRunSummary'
-	| 'buildEvidencePack'
-	| 'buildNavigationGraph'
-	| 'assertPageContract'
-	| 'createHandoff'
-	| 'selectorHealthReport'
-	| 'captureReviewQueue'
-	| 'startBrowserJob'
-	| 'getBrowserJob'
-	| 'cancelBrowserJob'
-	| 'recordWorkflow'
-	| 'replayWorkflow'
-	| 'runScenarioTemplate'
-	| 'resumeAfterAuth'
-	| 'runWorkflow';
-
 type BrowserActInput = BrowserStepInput & {
 	preset?: BrowserPreset;
 	steps?: BrowserStepInput[];
@@ -280,6 +215,7 @@ type BrowserActInput = BrowserStepInput & {
 type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'captureAfter' | 'includeScreenshot' | 'includeHtml'>> & {
 	id: string;
 	createdAt: string;
+	expiresAt: string;
 	selector?: string;
 	text?: string;
 	value?: string;
@@ -348,10 +284,12 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	frameDepth?: number;
 	retryProfile: 'conservative' | 'standard' | 'aggressive';
 	captureBeforeAfter: boolean;
+	effectPolicy: 'none' | 'observe' | 'require';
 	macroName?: string;
 	params?: Record<string, unknown>;
 	scenarioName?: string;
 	scenarioTemplates?: Record<string, unknown>;
+	templateVersion?: string;
 	assertText?: string;
 	assertNoText?: string;
 	assertSelector?: string;
@@ -412,9 +350,12 @@ type ReviewRequiredResult = {
 let server: http.Server | undefined;
 let output: vscode.OutputChannel;
 let setupPanel: vscode.WebviewPanel | undefined;
-const browserCommandQueue: BrowserCommand[] = [];
+const browserCommandQueue = new ExpiringCommandQueue<BrowserCommand>(50);
 const browserCommandWaiters = new Map<string, { resolve: (value: BrowserCommandCompletion) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }>();
 const browserCommandAvailabilityWaiters = new Set<() => void>();
+const BRIDGE_PROTOCOL_VERSION = '2.0';
+const bridgeStartedAt = new Date().toISOString();
+const commandMetrics = { queued: 0, delivered: 0, completed: 0, failed: 0, timedOut: 0, lateResults: 0 };
 const DEFAULT_ALLOWED_HOSTS = [
 	'security.microsoft.com',
 	'security.microsoft365.com',
@@ -440,6 +381,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.lm.registerTool('get_browser_state', createBrowserStateTool(context)),
 		vscode.lm.registerTool('read_browser_capture', createReadCaptureTool(context)),
 		vscode.lm.registerTool('read_browser_capture_group', createReadCaptureGroupTool(context)),
+		vscode.lm.registerTool('search_browser_captures', createSearchCapturesTool(context)),
+		vscode.lm.registerTool('browser_read', createCategorizedBrowserTool(context, 'read')),
+		vscode.lm.registerTool('browser_interact', createCategorizedBrowserTool(context, 'interact')),
+		vscode.lm.registerTool('browser_workflow', createCategorizedBrowserTool(context, 'workflow')),
+		vscode.lm.registerTool('browser_evidence', createCategorizedBrowserTool(context, 'evidence')),
+		vscode.lm.registerTool('browser_admin', createCategorizedBrowserTool(context, 'admin')),
 		vscode.lm.registerTool('browser_act', createBrowserActTool(context))
 	);
 
@@ -507,7 +454,16 @@ async function handleRequest(context: vscode.ExtensionContext, request: http.Inc
 	}
 
 	if (request.url === '/health' && request.method === 'GET') {
-		writeJson(response, 200, { ok: true, service: 'owen-browser-bridge' });
+		writeJson(response, 200, {
+			ok: true,
+			service: 'owen-browser-bridge',
+			protocolVersion: BRIDGE_PROTOCOL_VERSION,
+			extensionVersion: context.extension.packageJSON.version,
+			startedAt: bridgeStartedAt,
+			queueDepth: browserCommandQueue.length,
+			pendingResults: browserCommandWaiters.size,
+			metrics: commandMetrics
+		});
 		return;
 	}
 
@@ -522,7 +478,15 @@ async function handleRequest(context: vscode.ExtensionContext, request: http.Inc
 		if (browserCommandQueue.length === 0 && waitMs > 0) {
 			await waitForBrowserCommand(waitMs);
 		}
-		writeJson(response, 200, { command: browserCommandQueue.shift() ?? null });
+		const command = browserCommandQueue.take() ?? null;
+		if (command) {
+			commandMetrics.delivered += 1;
+		}
+		writeJson(response, 200, {
+			command,
+			protocolVersion: BRIDGE_PROTOCOL_VERSION,
+			extensionVersion: context.extension.packageJSON.version
+		});
 		return;
 	}
 
@@ -611,6 +575,8 @@ async function storeCapture(context: vscode.ExtensionContext, payload: BrowserCa
 		collectedAt
 	};
 	await updateCaptureGroupFiles(folder, stored);
+	await updateCaptureCatalog(baseDir, stored);
+	await applyCaptureRetention(context, baseDir, stored.id);
 	await updateLatestBrowserState(context, redactedPayload.browserSession, stored);
 	output.appendLine(`Stored capture ${id}: ${markdownPath}`);
 
@@ -728,6 +694,21 @@ function createReadCaptureGroupTool(context: vscode.ExtensionContext): vscode.La
 	};
 }
 
+function createSearchCapturesTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<CaptureSearchInput> {
+	return {
+		async invoke(options) {
+			const results = await searchCaptureCatalog(context, options.input);
+			return new vscode.LanguageModelToolResult([
+				vscode.LanguageModelDataPart.json({ count: results.length, captures: results }),
+				vscode.LanguageModelDataPart.text(renderCaptureSearchResults(results), 'text/plain')
+			]);
+		},
+		prepareInvocation(options) {
+			return { invocationMessage: `Searching browser captures${options.input.query ? ` for ${options.input.query}` : ''}` };
+		}
+	};
+}
+
 function createBrowserActTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<BrowserActInput> {
 	return {
 		async invoke(options) {
@@ -739,6 +720,25 @@ function createBrowserActTool(context: vscode.ExtensionContext): vscode.Language
 		},
 		prepareInvocation(options) {
 			return { invocationMessage: `Controlling paired browser: ${options.input.action ?? 'readPage'}` };
+		}
+	};
+}
+
+function createCategorizedBrowserTool(context: vscode.ExtensionContext, category: BrowserActionCategory): vscode.LanguageModelTool<BrowserActInput> {
+	return {
+		async invoke(options) {
+			const action = options.input.action as BrowserAction | undefined;
+			if (!action || !BROWSER_ACTIONS.includes(action) || getBrowserActionDefinition(action).category !== category) {
+				throw new Error(`browser_${category} requires an action in the ${category} category.`);
+			}
+			const { command, completion } = await invokeBrowserAction(context, options.input);
+			return new vscode.LanguageModelToolResult([
+				vscode.LanguageModelDataPart.json({ command, completion }),
+				vscode.LanguageModelDataPart.text(renderBrowserActMessage(command, completion), 'text/plain')
+			]);
+		},
+		prepareInvocation(options) {
+			return { invocationMessage: `Running ${category} browser action: ${options.input.action}` };
 		}
 	};
 }
@@ -757,24 +757,14 @@ async function invokeBrowserAction(context: vscode.ExtensionContext, input: Brow
 	return { command, completion };
 }
 
-const SUPPORTED_BROWSER_ACTIONS: BrowserAction[] = [
-	'readPage', 'capture', 'click', 'type', 'navigate', 'waitForText', 'wait', 'waitPreset', 'scroll', 'hover', 'keyPress',
-	'selectOption', 'clearInput', 'back', 'forward', 'reload', 'openInNewTab', 'switchTab', 'closeTab',
-	'listInteractables', 'inspectTargets', 'captureElement', 'captureRegion', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
-	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay',
-	'networkTraceCapture', 'safeDownloadAndHash', 'tableExtract', 'stateCheckpoint', 'rollbackToCheckpoint',
-	'humanReviewGate', 'bulkActionFromList', 'semanticWait', 'compareCaptureRuns', 'policyGuard', 'visualAssert', 'accessibilitySnapshot', 'mapForm',
-	'watchPageChanges', 'highlightEvidence', 'planAndRun', 'evidenceClaimCheck', 'tableWatchAndDiff', 'browserRunBundle', 'safeActionPreview', 'stableTargetProfile', 'guidedDrilldown', 'evidenceCompletenessCheck',
-	'failureExplainer', 'waitProfiler', 'automationHealthScore', 'sensitiveActionGuard', 'tabOrchestrator', 'popupGuard', 'returnToTab', 'tabRunSummary', 'buildEvidencePack', 'buildNavigationGraph', 'assertPageContract', 'createHandoff', 'selectorHealthReport',
-	'captureReviewQueue', 'startBrowserJob', 'getBrowserJob', 'cancelBrowserJob', 'recordWorkflow', 'replayWorkflow', 'runScenarioTemplate',
-	'resumeAfterAuth', 'runWorkflow'
-];
+const SUPPORTED_BROWSER_ACTIONS: readonly BrowserAction[] = BROWSER_ACTIONS;
 
 const DESTRUCTIVE_BROWSER_ACTIONS: BrowserAction[] = ['closeTab'];
 
 function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 	const action = (input.action ?? 'readPage') as BrowserAction;
 	const timeoutMs = clampTimeout(input.timeoutMs);
+	const createdAt = new Date();
 	const retryProfile = clampRetryProfile(input.retryProfile);
 	const retries = resolveRetries(input.retries, retryProfile);
 	const allowedHosts = getConfig().get<string[]>('allowedHosts', []);
@@ -802,9 +792,10 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 	}
 
 	return {
-		id: `command-${formatTimestamp(new Date().toISOString())}-${crypto.randomBytes(3).toString('hex')}`,
+		id: `command-${formatTimestamp(createdAt.toISOString())}-${crypto.randomBytes(3).toString('hex')}`,
 		action,
-		createdAt: new Date().toISOString(),
+		createdAt: createdAt.toISOString(),
+		expiresAt: new Date(createdAt.getTime() + timeoutMs + 35000).toISOString(),
 		selector: input.selector,
 		text: input.text,
 		value: input.value,
@@ -877,10 +868,12 @@ function createBrowserCommand(input: BrowserActInput): BrowserCommand {
 		includeScreenshot: input.includeScreenshot ?? true,
 		includeHtml: input.includeHtml ?? false,
 		captureBeforeAfter: Boolean(input.captureBeforeAfter),
+		effectPolicy: input.effectPolicy === 'none' || input.effectPolicy === 'require' ? input.effectPolicy : 'observe',
 		macroName: sanitizeMacroName(input.macroName),
 		params: sanitizeTemplateParams(input.params),
 		scenarioName: sanitizeScenarioName(input.scenarioName),
 		scenarioTemplates: sanitizeJsonObject(input.scenarioTemplates, 4),
+		templateVersion: input.templateVersion?.trim().slice(0, 40),
 		assertText: input.assertText,
 		assertNoText: input.assertNoText,
 		assertSelector: input.assertSelector,
@@ -1132,6 +1125,14 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 		}
 	}
 
+	if ((action === 'saveScenarioTemplate' || action === 'deleteScenarioTemplate') && !step.scenarioName) {
+		throw new Error(`browserAct ${action} requires scenarioName.`);
+	}
+
+	if (action === 'saveScenarioTemplate' && !step.scenarioTemplates?.[step.scenarioName ?? '']) {
+		throw new Error('browserAct saveScenarioTemplate requires scenarioTemplates[scenarioName].');
+	}
+
 	if (action === 'journeyCapture') {
 		if (!Array.isArray(step.urls) || step.urls.length === 0) {
 			throw new Error('browserAct journeyCapture requires urls.');
@@ -1261,7 +1262,9 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 }
 
 function enqueueBrowserCommand(command: BrowserCommand) {
-	browserCommandQueue.push(command);
+	browserCommandQueue.setMaxSize(clampCommandQueueSize(getConfig().get<number>('commandQueueMaxSize', 50)));
+	browserCommandQueue.enqueue(command);
+	commandMetrics.queued += 1;
 	for (const notify of browserCommandAvailabilityWaiters) {
 		notify();
 	}
@@ -1269,11 +1272,21 @@ function enqueueBrowserCommand(command: BrowserCommand) {
 	output.appendLine(`Queued browser command ${command.id}: ${command.action} (queue: ${browserCommandQueue.length})`);
 	return new Promise<BrowserCommandCompletion>((resolve, reject) => {
 		const timeout = setTimeout(() => {
+			browserCommandQueue.remove(command.id);
 			browserCommandWaiters.delete(command.id);
+			commandMetrics.timedOut += 1;
 			reject(new Error(`Timed out waiting for paired browser command result: ${command.id}`));
 		}, command.timeoutMs + 35000);
 		browserCommandWaiters.set(command.id, { resolve, reject, timeout });
 	});
+}
+
+function clampCommandQueueSize(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return 50;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), 1), 500);
 }
 
 function waitForBrowserCommand(waitMs: number) {
@@ -1295,6 +1308,7 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 
 	const waiter = browserCommandWaiters.get(completion.id);
 	if (!waiter) {
+		commandMetrics.lateResults += 1;
 		await appendBrowserActionLog(context, completion.id, completion, undefined);
 		return completion;
 	}
@@ -1314,8 +1328,10 @@ async function completeBrowserCommand(context: vscode.ExtensionContext, completi
 	clearTimeout(waiter.timeout);
 	browserCommandWaiters.delete(completion.id);
 	if (completion.ok === false && completion.error !== 'AUTH_REQUIRED' && completion.error !== 'REVIEW_REQUIRED') {
+		commandMetrics.failed += 1;
 		waiter.reject(new Error(completion.error ?? `Browser command failed: ${completion.id}`));
 	} else {
+		commandMetrics.completed += 1;
 		waiter.resolve(result);
 	}
 
@@ -1807,6 +1823,149 @@ async function updateCaptureGroupFiles(folder: string, latestCapture: StoredCapt
 	const summary = await readCaptureGroup(folder, latestCapture);
 	await fs.writeFile(path.join(folder, '_index.json'), JSON.stringify(summary, null, 2), 'utf8');
 	await fs.writeFile(path.join(folder, '_summary.md'), renderCaptureGroupMarkdown(summary), 'utf8');
+}
+
+async function updateCaptureCatalog(baseDir: string, latestCapture: StoredCapture) {
+	const catalogPath = path.join(baseDir, '_capture-catalog.jsonl');
+	const exists = await fs.stat(catalogPath).then(stat => stat.isFile()).catch(() => false);
+	if (!exists) {
+		const existing = await collectCaptureCatalogFromIndexes(baseDir);
+		await fs.writeFile(catalogPath, existing.map(item => JSON.stringify(item)).join('\n') + (existing.length > 0 ? '\n' : ''), 'utf8');
+	}
+	await fs.appendFile(catalogPath, `${JSON.stringify(latestCapture)}\n`, 'utf8');
+}
+
+async function applyCaptureRetention(context: vscode.ExtensionContext, baseDir: string, protectedId: string) {
+	const retentionDays = clampRetentionValue(getConfig().get<number>('captureRetentionDays', 0), 3650);
+	const maxItems = clampRetentionValue(getConfig().get<number>('captureRetentionMaxItems', 0), 100000);
+	if (retentionDays === 0 && maxItems === 0) {
+		return;
+	}
+
+	const catalogPath = path.join(baseDir, '_capture-catalog.jsonl');
+	const captures = await readCaptureCatalog(catalogPath);
+	const unique = [...new Map(captures.map(capture => [capture.id, capture])).values()]
+		.sort((left, right) => right.collectedAt.localeCompare(left.collectedAt));
+	const cutoff = retentionDays > 0 ? Date.now() - retentionDays * 86400000 : undefined;
+	const removed: StoredCapture[] = [];
+	const kept = unique.filter((capture, index) => {
+		if (capture.id === protectedId) {
+			return true;
+		}
+		const expiredByAge = cutoff !== undefined && Date.parse(capture.collectedAt) < cutoff;
+		const expiredByCount = maxItems > 0 && index >= maxItems;
+		if (expiredByAge || expiredByCount) {
+			removed.push(capture);
+			return false;
+		}
+		return true;
+	});
+	if (removed.length === 0) {
+		return;
+	}
+
+	const affectedFolders = new Set<string>();
+	for (const capture of removed) {
+		for (const candidate of [capture.jsonPath, capture.markdownPath, capture.screenshotPath]) {
+			if (candidate && isPathInside(baseDir, candidate)) {
+				await fs.unlink(candidate).catch(() => undefined);
+			}
+		}
+		if (isPathInside(baseDir, capture.folder)) {
+			affectedFolders.add(capture.folder);
+		}
+	}
+	await fs.writeFile(catalogPath, kept.length > 0 ? `${kept.map(item => JSON.stringify(item)).join('\n')}\n` : '', 'utf8');
+	for (const folder of affectedFolders) {
+		const summary = await readCaptureGroup(folder);
+		await fs.writeFile(path.join(folder, '_index.json'), JSON.stringify(summary, null, 2), 'utf8');
+		await fs.writeFile(path.join(folder, '_summary.md'), renderCaptureGroupMarkdown(summary), 'utf8');
+	}
+	output.appendLine(`Capture retention removed ${removed.length} capture(s).`);
+}
+
+function clampRetentionValue(value: number | undefined, maximum: number) {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+		return 0;
+	}
+	return Math.min(Math.max(Math.trunc(value), 1), maximum);
+}
+
+function isPathInside(parent: string, candidate: string) {
+	const relative = path.relative(path.resolve(parent), path.resolve(candidate));
+	return relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+async function searchCaptureCatalog(context: vscode.ExtensionContext, input: CaptureSearchInput) {
+	const baseDir = await getCaptureBaseDir(context);
+	const catalogPath = path.join(baseDir, '_capture-catalog.jsonl');
+	let captures = await readCaptureCatalog(catalogPath);
+	if (captures.length === 0) {
+		captures = await collectCaptureCatalogFromIndexes(baseDir);
+		if (captures.length > 0) {
+			await fs.mkdir(baseDir, { recursive: true });
+			await fs.writeFile(catalogPath, `${captures.map(item => JSON.stringify(item)).join('\n')}\n`, 'utf8');
+		}
+	}
+
+	const query = input.query?.trim().toLowerCase();
+	const host = input.host?.trim().toLowerCase();
+	const group = input.group?.trim().toLowerCase();
+	const from = input.from ? Date.parse(input.from) : undefined;
+	const to = input.to ? Date.parse(input.to) : undefined;
+	const limit = Math.min(Math.max(Math.trunc(input.limit ?? 20), 1), 200);
+	const seen = new Set<string>();
+	return captures
+		.filter(capture => {
+			if (seen.has(capture.id)) {
+				return false;
+			}
+			seen.add(capture.id);
+			const haystack = [capture.id, capture.title, capture.url, capture.host, capture.groupName].filter(Boolean).join(' ').toLowerCase();
+			const collectedAt = Date.parse(capture.collectedAt);
+			return (!query || haystack.includes(query))
+				&& (!host || capture.host.toLowerCase().includes(host))
+				&& (!group || capture.groupName.toLowerCase().includes(group))
+				&& (!Number.isFinite(from) || collectedAt >= (from as number))
+				&& (!Number.isFinite(to) || collectedAt <= (to as number));
+		})
+		.sort((left, right) => right.collectedAt.localeCompare(left.collectedAt))
+		.slice(0, limit);
+}
+
+async function readCaptureCatalog(catalogPath: string) {
+	const text = await fs.readFile(catalogPath, 'utf8').catch(() => '');
+	return text.split(/\r?\n/).filter(Boolean).flatMap(line => {
+		try {
+			return [JSON.parse(line) as StoredCapture];
+		} catch {
+			return [];
+		}
+	});
+}
+
+async function collectCaptureCatalogFromIndexes(folder: string): Promise<StoredCapture[]> {
+	const captures: StoredCapture[] = [];
+	const entries = await fs.readdir(folder, { withFileTypes: true }).catch(() => []);
+	for (const entry of entries) {
+		const candidate = path.join(folder, entry.name);
+		if (entry.isDirectory()) {
+			captures.push(...await collectCaptureCatalogFromIndexes(candidate));
+		} else if (entry.name === '_index.json') {
+			const summary = await fs.readFile(candidate, 'utf8').then(text => JSON.parse(text) as CaptureGroupSummary).catch(() => undefined);
+			if (Array.isArray(summary?.captures)) {
+				captures.push(...summary.captures);
+			}
+		}
+	}
+	return captures;
+}
+
+function renderCaptureSearchResults(captures: StoredCapture[]) {
+	if (captures.length === 0) {
+		return 'No browser captures matched the search.';
+	}
+	return captures.map(capture => `${capture.id} | ${capture.collectedAt} | ${capture.host}/${capture.groupName} | ${capture.title ?? capture.url ?? '(untitled)'}`).join('\n');
 }
 
 async function readCaptureGroup(folder: string, knownCapture?: StoredCapture): Promise<CaptureGroupSummary> {
@@ -2485,68 +2644,12 @@ function redactUnknown(value: unknown): unknown {
 	return value;
 }
 
-function isAllowedHost(hostname: string, allowedHosts: string[]) {
-	const normalizedHost = hostname.toLowerCase();
-	return allowedHosts.some(entry => {
-		const normalizedEntry = normalizeAllowedHost(entry);
-		if (!normalizedEntry) {
-			return false;
-		}
-
-		if (normalizedEntry.startsWith('*.')) {
-			const suffix = normalizedEntry.slice(1);
-			return normalizedHost.endsWith(suffix);
-		}
-
-		return normalizedHost === normalizedEntry;
-	});
-}
-
-function normalizeAllowedHost(entry: string) {
-	const trimmed = entry.trim().toLowerCase();
-	if (!trimmed) {
-		return undefined;
-	}
-
-	if (trimmed.includes('://')) {
-		return new URL(trimmed).hostname;
-	}
-
-	return trimmed.split('/')[0];
-}
-
 function redactText(value: string | undefined) {
-	if (!value) {
-		return value;
-	}
-
-	const profile = getConfig().get<string>('redactionProfile', 'standard');
-	if (profile === 'off') {
-		return value;
-	}
-
-	let redacted = value
-		.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
-		.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[redacted-ip]')
-		.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '[redacted-guid]')
-		.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer [redacted-token]')
-		.replace(/(access_token|refresh_token|id_token|sessionid|session_id|sid)=([^\s&]+)/gi, '$1=[redacted-token]');
-
-	if (profile === 'strict') {
-		redacted = redacted
-			.replace(/\b(?:[A-Za-z0-9+/]{20,}={0,2})\b/g, '[redacted-long-token]')
-			.replace(/\b(?:[0-9a-f]{32,})\b/gi, '[redacted-hex-token]');
-	}
-
-	for (const pattern of getConfig().get<string[]>('customRedactionPatterns', [])) {
-		try {
-			redacted = redacted.replace(new RegExp(pattern, 'g'), '[redacted-custom]');
-		} catch {
-			output?.appendLine(`Ignoring invalid custom redaction pattern: ${pattern}`);
-		}
-	}
-
-	return redacted;
+	const configuredProfile = getConfig().get<string>('redactionProfile', 'standard');
+	const profile: RedactionProfile = configuredProfile === 'off' || configuredProfile === 'strict' ? configuredProfile : 'standard';
+	return redactSensitiveText(value, profile, getConfig().get<string[]>('customRedactionPatterns', []), pattern => {
+		output?.appendLine(`Ignoring invalid custom redaction pattern: ${pattern}`);
+	});
 }
 
 function renderMarkdown(payload: BrowserCapturePayload, screenshotFile?: string) {

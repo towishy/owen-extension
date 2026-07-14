@@ -44,6 +44,12 @@ In GitHub Copilot Chat, use the contributed tool reference names:
 | `#getLatestBrowserCapture` | Read the latest capture |
 | `#readBrowserCapture` | Read one capture by id/path |
 | `#readBrowserCaptureGroup` | Read all captures in a host or investigation group |
+| `#searchBrowserCaptures` | Search capture metadata across hosts and groups |
+| `#browserRead` | Run compact read/readiness actions |
+| `#browserInteract` | Run direct interaction and navigation actions |
+| `#browserWorkflow` | Run multi-step workflows and scenarios |
+| `#browserEvidence` | Capture, validate, and package evidence |
+| `#browserAdmin` | Manage jobs, macros, templates, and review queues |
 
 Some agent hosts may expose the underlying tool ids such as `browser_act` or `get_browser_state`. If `#browserAct` or `#getBrowserState` is unavailable, try the snake_case id or inspect the available tool list.
 
@@ -96,6 +102,8 @@ For high-risk navigation or multi-page actions, include:
 }
 ```
 
+For clicks, typing, scrolling, or selections where a silent no-op is unacceptable, include `"effectPolicy": "require"`. The result records URL, DOM, scroll, focus, and target-state changes. Use `observe` when a no-effect result should be reported without failing the action.
+
 ## Action Catalog
 
 Smoke-test status is based on the local control page run on 2026-06-06 with Edge demo profile `Profile 1`. Calls below omit common fields such as `captureAfter`, `includeScreenshot`, `investigationName`, and `timeoutMs` unless they are relevant.
@@ -126,12 +134,16 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | `captureRegion` | Capture screenshot clipped to explicit rectangle | `regionX`, `regionY`, `regionWidth`, `regionHeight` | New | `#browserAct { "action": "captureRegion", "regionX": 320, "regionY": 180, "regionWidth": 760, "regionHeight": 420, "captureAfter": true }` |
 | `runWorkflow` | Execute multiple steps | `steps`, `preset` | Fails: unserializable script argument | `#browserAct { "action": "runWorkflow", "steps": [{ "action": "readPage" }, { "action": "click", "selector": "#click-target" }] }` |
 | `runScenarioTemplate` | Execute a built-in or custom scenario template | `scenarioName`, `params`, `scenarioTemplates` | New | `#browserAct { "action": "runScenarioTemplate", "scenarioName": "portalReadinessCheck", "captureAfter": false }` |
+| `listScenarioTemplates` | List built-in and persisted scenario templates | none | New | `#browserAdmin { "action": "listScenarioTemplates" }` |
+| `saveScenarioTemplate` | Save a versioned local scenario template | `scenarioName`, `scenarioTemplates`, `templateVersion` | New | `#browserAdmin { "action": "saveScenarioTemplate", "scenarioName": "myCheck", "scenarioTemplates": { "myCheck": { "steps": [{ "action": "readPage" }] } }, "templateVersion": "1.0.0" }` |
+| `deleteScenarioTemplate` | Delete a persisted template without affecting built-ins | `scenarioName` | New | `#browserAdmin { "action": "deleteScenarioTemplate", "scenarioName": "myCheck" }` |
+| `exportScenarioTemplates` | Export persisted templates as structured JSON | none | New | `#browserAdmin { "action": "exportScenarioTemplates" }` |
 | `journeyCapture` | Visit URL list and collect summaries | `urls`, `maxPages`, `extractSelectors` | Success | `#browserAct { "action": "journeyCapture", "urls": ["http://127.0.0.1:18080/page1", "http://127.0.0.1:18080/page2"], "maxPages": 2, "extractSelectors": { "ready": "#ready-text" }, "acknowledgement": "CONFIRM_BROWSER_ACTION" }` |
 | `paginateCapture` | Follow next-page controls | `nextSelector`, `nextText`, `maxPages` | Success | `#browserAct { "action": "paginateCapture", "nextSelector": "#next-page", "maxPages": 2, "extractSelectors": { "ready": "#ready-text" } }` |
 | `smartFormFill` | Fill form fields by label/name/placeholder | `formFields`, `submitSelector`, `submitText` | Success | `#browserAct { "action": "smartFormFill", "formFields": { "Name": "Smart Fill", "Notes": "Smart notes" }, "submitSelector": "#submit-form" }` |
 | `conditionalWorkflow` | Branch based on page state | `conditions` | Success | `#browserAct { "action": "conditionalWorkflow", "conditions": [{ "if": { "text": "READY_MARKER" }, "then": [{ "action": "click", "selector": "#click-target" }] }] }` |
 | `multiTabCrawl` | Open matched links in background tabs | `linkSelector`, `linkText`, `maxTabs` | Fails: unserializable script argument | `#browserAct { "action": "multiTabCrawl", "linkSelector": ".crawl-link", "maxTabs": 2 }` |
-| `runtimeSnapshot` | Return performance/resource hints | none | Success | `#browserAct { "action": "runtimeSnapshot" }` |
+| `runtimeSnapshot` | Return resources, navigation timing, paint, LCP, CLS, and long-task metrics | none | Success | `#browserRead { "action": "runtimeSnapshot" }` |
 | `domDiffTimeline` | Run steps and compare DOM fingerprints | `steps` | Success | `#browserAct { "action": "domDiffTimeline", "steps": [{ "action": "click", "selector": "#click-target" }, { "action": "type", "selector": "#name-input", "value": "Diff Test" }] }` |
 | `ocrSnapshot` | Return screenshot and DOM text hints | none | Success | `#browserAct { "action": "ocrSnapshot" }` |
 | `dataGapGuard` | Check required fields/texts | `requiredFields`, `requiredTexts`, `extractSelectors` | Success | `#browserAct { "action": "dataGapGuard", "requiredFields": ["ready"], "requiredTexts": ["READY_MARKER"], "extractSelectors": { "ready": "#ready-text" } }` |
@@ -214,6 +226,8 @@ Use these inputs with `#browserAct` for higher reliability on modern web apps:
 | `params` | Template values for replay and scenario templates (`{{key}}`) |
 | `scenarioName` | Built-in or custom scenario template name for `runScenarioTemplate` |
 | `scenarioTemplates` | Optional custom template registry with defaults and steps |
+| `templateVersion` | Version stored with `saveScenarioTemplate` |
+| `effectPolicy` | Post-action effect handling: `none`, `observe`, `require` |
 | `goal` | Natural-language goal for `planAndRun` |
 | `claim` | Report statement checked by `evidenceClaimCheck` |
 | `requiredClaims` | Required claim/category list for `evidenceCompletenessCheck` |
@@ -238,7 +252,7 @@ Selector memory is enabled by default. When auto-heal or a remembered selector s
 
 For debugging, run `Owen Browser Bridge: Show Action Trace` in VS Code. It opens a compact Markdown table from the latest `_action-logs/browser-actions-*.jsonl` file, including command ids, actions, step counts, diff metadata, and stored capture links.
 
-Captured JSON and Markdown are redacted before storage. Use `owenBrowserBridge.redactionProfile` (`off`, `standard`, `strict`) and `owenBrowserBridge.customRedactionPatterns` for site-specific sensitive strings. Do not commit raw captures or screenshots.
+Captured JSON and Markdown are redacted before storage. Use `owenBrowserBridge.redactionProfile` (`off`, `standard`, `strict`) and `owenBrowserBridge.customRedactionPatterns` for site-specific sensitive strings. PNG capture redaction is configured separately in the browser popup and defaults to `standard`; `strict` also masks all input-like fields and visible email, IP, and GUID values. The pairing token is stored in browser-local storage, not browser-sync storage. Do not commit raw captures or screenshots.
 
 New actions:
 
@@ -271,10 +285,11 @@ New actions:
 | `createHandoff` | Create a manual handoff report with latest run and candidate targets | `reviewPrompt`, `targetHint` |
 | `selectorHealthReport` | Export remembered selector usage summary | none |
 | `captureReviewQueue` | Export runs with failed steps or quality findings | `maxEntries` |
-| `startBrowserJob` / `getBrowserJob` / `cancelBrowserJob` | Manage a named synchronous job summary for step bundles | `jobName`, `steps` |
+| `startBrowserJob` / `getBrowserJob` / `cancelBrowserJob` | Manage a persisted stepwise job that accepts cancellation between steps | `jobName`, `steps` |
 | `recordWorkflow` | Save reusable workflow steps in browser local storage | `macroName`, `steps` |
 | `replayWorkflow` | Replay a saved workflow with optional template parameters | `macroName`, `params`, `captureBeforeAfter` |
 | `runScenarioTemplate` | Run a reusable browser scenario from generic or Microsoft Security template registries | `scenarioName`, `params`, `scenarioTemplates` |
+| `listScenarioTemplates` / `saveScenarioTemplate` / `deleteScenarioTemplate` / `exportScenarioTemplates` | Manage persisted versioned scenario templates | `scenarioName`, `scenarioTemplates`, `templateVersion` |
 
 ## Scenario Templates
 
