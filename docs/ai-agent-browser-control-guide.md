@@ -49,6 +49,7 @@ In GitHub Copilot Chat, use the contributed tool reference names:
 | `#browserRead` | Run compact read/readiness actions |
 | `#browserInteract` | Run direct interaction and navigation actions |
 | `#browserWorkflow` | Run multi-step workflows and scenarios |
+| `#browserAgent` | Run, resume, inspect, or cancel an adaptive evidence-aware browser goal |
 | `#browserEvidence` | Capture, validate, and package evidence |
 | `#browserAdmin` | Manage jobs, macros, templates, and review queues |
 
@@ -109,6 +110,33 @@ For high-risk navigation or multi-page actions, include:
 ```
 
 For clicks, typing, scrolling, or selections where a silent no-op is unacceptable, include `"effectPolicy": "require"`. The result records URL, DOM, scroll, focus, and target-state changes. Use `observe` when a no-effect result should be reported without failing the action.
+
+## Adaptive Agent Runs
+
+Use `#browserAgent` for a goal whose next step depends on the result of the previous step. Existing `planAndRun` calls use the same adaptive runtime for compatibility. Use `#browserWorkflow`, scenario templates, or browser jobs for deterministic, already-known procedures.
+
+```json
+{
+  "operation": "run",
+  "goal": "Verify the current incident severity and affected assets with visible evidence",
+  "maxSteps": 12,
+  "requiredClaims": ["severity", "affected assets"]
+}
+```
+
+The VS Code host performs `observe -> compact -> plan one action -> policy/review -> execute -> verify -> judge`. It does not place model orchestration in the MV3 service worker. Every Agent Run inherits allowed-host and secret-handling constraints, allows one state-changing action per observation, and stops for authentication, CAPTCHA, sensitive targets, or destructive operations.
+
+Use lifecycle operations with the returned `runId`:
+
+```json
+{ "operation": "get", "runId": "agent-run-..." }
+{ "operation": "resume", "runId": "agent-run-..." }
+{ "operation": "cancel", "runId": "agent-run-..." }
+```
+
+Resume only after the operator has completed the required authentication or review in the paired browser. A VS Code restart converts an interrupted active run into a resumable `partial` state. Repeated browser fingerprints trigger replanning and eventually an operator handoff instead of unbounded retries.
+
+For direct `runWorkflow` batches, the passive browser executor discards remaining actions when navigation, tab, URL, focus, or relevant DOM state becomes stale. Submit a new observation before planning another write.
 
 ## Action Catalog
 

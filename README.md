@@ -139,6 +139,12 @@ After both extensions are installed, follow [Pairing Setup](#pairing-setup).
 
 The README keeps only the four most recent release highlights. See the full [CHANGELOG](CHANGELOG.md) or [GitHub Releases](https://github.com/towishy/owen-extension/releases) for complete history and downloadable assets.
 
+### 0.1.30
+
+- Added an adaptive Browser Agent Runtime with plan/progress tracking, loop-aware replanning, context compaction, evidence-based completion judgement, and constrained model fallback.
+- Added `browser_agent` run, resume, get, and cancel lifecycle operations with persisted history, restart recovery, safety review, and local model/token metrics.
+- Routed `planAndRun` through the adaptive runtime, added stale-batch and navigation-readiness guards, and exposed a risk-aware `custom.*` action plugin API.
+
 ### 0.1.29
 
 - Fixed empty Copilot tool responses by exposing browser-state, capture, and action summaries as `LanguageModelTextPart` values while preserving structured JSON parts.
@@ -156,12 +162,6 @@ The README keeps only the four most recent release highlights. See the full [CHA
 - Added protocol 3.0 command leases, ACK/completion ownership, idempotent result delivery, a persisted browser outbox, and retry backoff.
 - Added persistent browser-agent identities, explicit multi-agent routing, optional per-site browser permissions, and durable workflow runtime state.
 - Added the Browser Captures Explorer, SHA-256 capture manifests, storage status and deletion commands, release checksums, and one-release/one-tag retention automation.
-
-### 0.1.26
-
-- Added expiring command queues, lifecycle health metrics, screenshot redaction, and observable action-effect policies.
-- Added persisted cancellable browser jobs, capture search and retention, compact category tools, and versioned scenario templates.
-- Expanded `runtimeSnapshot` with navigation timing, paint, LCP, CLS, and long-task metrics.
 
 ## Pairing Setup
 
@@ -252,11 +252,40 @@ The VS Code extension contributes these Language Model Tools:
 - `#readBrowserCaptureGroup`: returns every capture in a host or investigation group for correlation
 - `#searchBrowserCaptures`: searches the global local capture catalog by text, host, group, and date
 - `#browserRead`, `#browserInteract`, `#browserWorkflow`, `#browserEvidence`, `#browserAdmin`: compact category-specific action tools
+- `#browserAgent`: runs an adaptive, evidence-aware browser goal with planning, replanning, resume, and cancellation
 - `#browserAct`: compatibility tool exposing every browser action and input
 
 Tool results expose readable summaries and capture Markdown as `LanguageModelTextPart` values, with structured payloads retained as JSON data parts. This keeps results visible in Copilot Chat while preserving machine-readable state for compatible callers.
 
 Each Chrome/Edge installation keeps a stable browser agent id. With one active agent, routing is automatic. With multiple active agents, pass `targetAgentId` or set `owenBrowserBridge.preferredAgentId`; the bridge refuses ambiguous routing instead of choosing silently.
+
+### Adaptive Browser Agent
+
+Use `#browserAgent` when the goal needs multiple browser steps and the next action depends on the latest page state. An Agent Run observes the page before every action, keeps a plan/progress ledger, compacts long context, detects repeated states, replans, and judges completion from supplied evidence. Existing `planAndRun` calls are routed to this adaptive runtime for compatibility; explicit `runWorkflow` and browser jobs remain deterministic step executors.
+
+```text
+#browserAgent { "operation": "run", "goal": "Open the current Defender incident, verify severity and affected assets, and stop with evidence", "maxSteps": 12, "requiredClaims": ["severity", "affected assets"] }
+#browserAgent { "operation": "get", "runId": "agent-run-..." }
+#browserAgent { "operation": "resume", "runId": "agent-run-..." }
+#browserAgent { "operation": "cancel", "runId": "agent-run-..." }
+```
+
+The default budget is 12 state-changing actions. The planner may choose only one action per observation. Three repeated browser fingerprints force replanning; five repetitions or three replans produce an operator handoff. Authentication, CAPTCHA, destructive targets, approvals, policy changes, downloads, uploads, and bulk actions stop for review. Browser workflows also stop remaining batch steps after navigation, active-tab, URL, focus, or relevant DOM changes.
+
+Agent Runs are stored locally in VS Code global state with bounded plan, observation, action, effect, judgement, model, token, and fallback metrics. Interrupted active runs become resumable `partial` runs when the extension host restarts.
+
+Trusted VS Code extensions can register a limited host-side action through the activation API. A plugin must use the `custom.*` namespace and declare `description`, `capability`, and `risk`; `browser-write` actions cannot claim low risk, destructive plugins are excluded from autonomous planning, and custom actions cannot invoke other custom actions.
+
+```ts
+const bridge = await vscode.extensions.getExtension<BrowserBridgeExtensionApi>('towishy.owen-browser-bridge')?.activate();
+const registration = bridge?.registerAgentAction({
+	name: 'custom.collect-case-evidence',
+	description: 'Collect evidence using a domain-specific built-in browser action.',
+	capability: 'evidence',
+	risk: 'low',
+	handler: (_input, context) => context.executeBuiltIn({ action: 'readPage', captureAfter: false })
+});
+```
 
 Example Copilot prompts:
 

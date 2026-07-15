@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -25,6 +25,7 @@
     "onLanguageModelTool:browser_read",
     "onLanguageModelTool:browser_interact",
     "onLanguageModelTool:browser_workflow",
+    "onLanguageModelTool:browser_agent",
     "onLanguageModelTool:browser_evidence",
     "onLanguageModelTool:browser_admin",
     "onLanguageModelTool:browser_act"
@@ -486,6 +487,80 @@
             "action"
           ],
           "additionalProperties": true
+        }
+      },
+      {
+        "name": "browser_agent",
+        "displayName": "Run Browser Agent Goal",
+        "userDescription": "Runs an evidence-aware, operator-supervised browser goal with planning and replanning.",
+        "modelDescription": "Use for goals that require multiple adaptive browser steps. The VS Code host observes, plans one action, verifies effects, detects loops, compacts context, and judges completion. Use operation=resume, get, or cancel with runId for lifecycle control.",
+        "toolReferenceName": "browserAgent",
+        "tags": [
+          "browser",
+          "agent",
+          "workflow",
+          "automation"
+        ],
+        "icon": "$(hubot)",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": [
+                "run",
+                "resume",
+                "get",
+                "cancel"
+              ],
+              "description": "Run or resume a goal, read a stored run, or request cancellation. Defaults to run."
+            },
+            "runId": {
+              "type": "string"
+            },
+            "goal": {
+              "type": "string",
+              "description": "Goal for operation=run. Optional override when resuming."
+            },
+            "maxSteps": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 50,
+              "description": "Maximum state-changing steps. Defaults to 12."
+            },
+            "maxRetriesPerStep": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3
+            },
+            "hardConstraints": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requiredClaims": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "modelId": {
+              "type": "string",
+              "description": "Optional VS Code language model id for planning and judging."
+            },
+            "fallbackModelId": {
+              "type": "string",
+              "description": "Optional fallback model used only for truncation, schema, parse, or timeout failures."
+            },
+            "targetAgentId": {
+              "type": "string",
+              "description": "Specific paired Edge/Chrome agent id when multiple agents are active."
+            }
+          },
+          "required": [],
+          "additionalProperties": false
         }
       },
       {

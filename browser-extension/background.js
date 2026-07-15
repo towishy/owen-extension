@@ -212,15 +212,15 @@ async function executeBrowserCommand(command, options) {
     const workflow = command.action === 'runWorkflow' ? normalizeWorkflowSteps(command.steps) : [command];
     const executionTrail = [];
     let beforeAfterDiff;
+    let staleBatchGuard;
 
     if (command.captureBeforeAfter) {
       const activeTab = await getActiveTab();
       const before = await collectDomFingerprint(activeTab.id);
       const beforeUrl = activeTab.url;
-      for (const step of workflow) {
-        const result = await executeSingleAction(step, command.allowedHosts);
-        executionTrail.push({ action: step.action, result });
-      }
+      const execution = await executeWorkflowSteps(workflow, command.allowedHosts);
+      executionTrail.push(...execution.steps);
+      staleBatchGuard = execution.staleBatchGuard;
       const afterTab = await getActiveTab();
       const after = await collectDomFingerprint(afterTab.id);
       beforeAfterDiff = {
@@ -232,10 +232,9 @@ async function executeBrowserCommand(command, options) {
         headingDelta: after.headings - before.headings
       };
     } else {
-      for (const step of workflow) {
-        const result = await executeSingleAction(step, command.allowedHosts);
-        executionTrail.push({ action: step.action, result });
-      }
+      const execution = await executeWorkflowSteps(workflow, command.allowedHosts);
+      executionTrail.push(...execution.steps);
+      staleBatchGuard = execution.staleBatchGuard;
     }
 
     const currentTab = await getActiveTab();
@@ -253,6 +252,7 @@ async function executeBrowserCommand(command, options) {
         action: command.action,
         steps: executionTrail,
         beforeAfterDiff,
+        staleBatchGuard,
         url: currentTab.url,
         title: currentTab.title,
         tabIndex: currentTab.index,
@@ -330,6 +330,33 @@ function normalizeWorkflowSteps(steps) {
   }
 
   return steps.map(step => ({ ...step, action: step.action ?? 'readPage' }));
+}
+
+async function executeWorkflowSteps(workflow, allowedHosts) {
+  const steps = [];
+  for (let index = 0; index < workflow.length; index += 1) {
+    const step = workflow[index];
+    const before = workflow.length > 1 ? await collectActionEffectState(step).catch(() => undefined) : undefined;
+    const result = await executeSingleAction(step, allowedHosts);
+    steps.push({ action: step.action, result });
+    if (index >= workflow.length - 1) {
+      continue;
+    }
+    const after = await collectActionEffectState(step).catch(() => undefined);
+    const reason = globalThis.OwenProtocolRuntime.staleBatchReason(before, after, step.action);
+    if (reason) {
+      return {
+        steps,
+        staleBatchGuard: {
+          stopped: true,
+          reason,
+          stoppedAfterIndex: index,
+          skippedActions: workflow.slice(index + 1).map(item => item.action)
+        }
+      };
+    }
+  }
+  return { steps, staleBatchGuard: { stopped: false } };
 }
 
 async function executeSingleAction(command, allowedHosts) {
@@ -603,10 +630,9 @@ async function executeSingleActionCore(command, allowedHosts) {
   if (action === 'navigate') {
     assertAllowedUrl(command.url, allowedHosts);
     const tab = await getActiveTab();
-    await chrome.tabs.update(tab.id, { url: command.url });
-    await waitForTabComplete(tab.id, command.timeoutMs);
+    const navigationKind = await waitForNavigationReady(tab.id, command.timeoutMs, tab.url, () => chrome.tabs.update(tab.id, { url: command.url }));
     const updated = await chrome.tabs.get(tab.id);
-    return { ok: true, url: updated.url, title: updated.title };
+    return { ok: true, url: updated.url, title: updated.title, navigationKind };
   }
 
   if (action === 'openInNewTab') {
@@ -646,21 +672,18 @@ async function executeSingleActionCore(command, allowedHosts) {
   assertAllowedUrl(tab.url, allowedHosts);
 
   if (action === 'back') {
-    await chrome.tabs.goBack(tab.id).catch(() => undefined);
-    await waitForTabComplete(tab.id, command.timeoutMs).catch(() => undefined);
-    return { ok: true };
+    const navigationKind = await waitForNavigationReady(tab.id, command.timeoutMs, tab.url, () => chrome.tabs.goBack(tab.id)).catch(() => undefined);
+    return { ok: true, navigationKind };
   }
 
   if (action === 'forward') {
-    await chrome.tabs.goForward(tab.id).catch(() => undefined);
-    await waitForTabComplete(tab.id, command.timeoutMs).catch(() => undefined);
-    return { ok: true };
+    const navigationKind = await waitForNavigationReady(tab.id, command.timeoutMs, tab.url, () => chrome.tabs.goForward(tab.id)).catch(() => undefined);
+    return { ok: true, navigationKind };
   }
 
   if (action === 'reload') {
-    await chrome.tabs.reload(tab.id);
-    await waitForTabComplete(tab.id, command.timeoutMs);
-    return { ok: true };
+    const navigationKind = await waitForNavigationReady(tab.id, command.timeoutMs, tab.url, () => chrome.tabs.reload(tab.id));
+    return { ok: true, navigationKind };
   }
 
   if (action === 'capture') {
@@ -4670,6 +4693,34 @@ function waitForTabComplete(tabId, timeoutMs) {
       }
     };
     chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+function waitForNavigationReady(tabId, timeoutMs, previousUrl, trigger) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(listener);
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timed out waiting for navigation readiness.'));
+    }, timeoutMs ?? 30000);
+    const listener = (updatedTabId, changeInfo, tab) => {
+      if (updatedTabId !== tabId) {
+        return;
+      }
+      const kind = globalThis.OwenProtocolRuntime.navigationReadinessKind(previousUrl, changeInfo, tab);
+      if (kind) {
+        cleanup();
+        resolve(kind);
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    Promise.resolve().then(trigger).catch(error => {
+      cleanup();
+      reject(error);
+    });
   });
 }
 

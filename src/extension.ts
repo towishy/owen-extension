@@ -3,12 +3,16 @@ import { promises as fs } from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { AgentActionPluginRegistry, type AgentActionPlugin } from './agent-action-registry';
+import { AgentRunner, type AgentBrowserAction, type AgentBrowserResult } from './agent-runner';
+import { finalizeAgentRun, type AgentRun } from './agent-runtime';
 import { BRIDGE_PROTOCOL_VERSION, BrowserAgentRegistry, requireCompatibleProtocol } from './bridge-protocol';
-import { BROWSER_ACTIONS, getBrowserActionDefinition, type BrowserAction, type BrowserActionCategory } from './browser-actions';
+import { BROWSER_ACTION_REGISTRY, BROWSER_ACTIONS, getBrowserActionDefinition, type BrowserAction, type BrowserActionCategory } from './browser-actions';
 import { BrowserCapturesTreeProvider, type CaptureExplorerEntry } from './capture-explorer';
 import { writeCaptureIntegrityManifest } from './capture-integrity';
 import { ExpiringCommandQueue } from './command-queue';
 import { isAllowedHost, normalizeAllowedHost } from './host-policy';
+import { createLanguageModelJudge, createLanguageModelPlanner } from './language-model-planner';
 import { redactSensitiveText, type RedactionProfile } from './redaction';
 
 type BrowserCapturePayload = {
@@ -217,6 +221,19 @@ type BrowserActInput = BrowserStepInput & {
 	investigationName?: string;
 };
 
+type BrowserAgentInput = {
+	operation?: 'run' | 'resume' | 'get' | 'cancel';
+	runId?: string;
+	goal?: string;
+	maxSteps?: number;
+	maxRetriesPerStep?: number;
+	hardConstraints?: string[];
+	requiredClaims?: string[];
+	modelId?: string;
+	fallbackModelId?: string;
+	targetAgentId?: string;
+};
+
 type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'captureAfter' | 'includeScreenshot' | 'includeHtml'>> & {
 	id: string;
 	targetAgentId?: string;
@@ -363,6 +380,17 @@ const browserCommandWaiters = new Map<string, { resolve: (value: BrowserCommandC
 const completedBrowserCommands = new Map<string, { agentId: string; completion: BrowserCommandCompletion }>();
 const browserCommandAvailabilityWaiters = new Set<() => void>();
 const browserAgents = new BrowserAgentRegistry();
+const cancelledAgentRuns = new Set<string>();
+const AGENT_RUNS_STATE_KEY = 'browserAgentRuns';
+const agentActionPlugins = new AgentActionPluginRegistry();
+const AGENT_DISALLOWED_ACTIONS = new Set<BrowserAction>([
+	'closeTab', 'safeDownloadAndHash', 'bulkActionFromList', 'rollbackToCheckpoint', 'startBrowserJob', 'cancelBrowserJob',
+	'recordWorkflow', 'replayWorkflow', 'saveScenarioTemplate', 'deleteScenarioTemplate', 'runScenarioTemplate', 'runWorkflow', 'planAndRun'
+]);
+const AGENT_STATE_CHANGING_ACTIONS = new Set([
+	'click', 'type', 'navigate', 'scroll', 'keyPress', 'selectOption', 'clearInput', 'back', 'forward', 'reload',
+	'openInNewTab', 'switchTab', 'smartFormFill', 'tabOrchestrator', 'returnToTab'
+]);
 const bridgeStartedAt = new Date().toISOString();
 const commandMetrics = { queued: 0, delivered: 0, redelivered: 0, acknowledged: 0, completed: 0, failed: 0, timedOut: 0, lateResults: 0, protocolMismatches: 0 };
 const DEFAULT_ALLOWED_HOSTS = [
@@ -373,9 +401,14 @@ const DEFAULT_ALLOWED_HOSTS = [
 	'*.microsoft.com'
 ];
 
-export async function activate(context: vscode.ExtensionContext) {
+export type BrowserBridgeExtensionApi = {
+	registerAgentAction(plugin: AgentActionPlugin): { dispose(): void };
+};
+
+export async function activate(context: vscode.ExtensionContext): Promise<BrowserBridgeExtensionApi> {
 	output = vscode.window.createOutputChannel('Owen Browser Bridge');
 	context.subscriptions.push(output);
+	await recoverInterruptedAgentRuns(context);
 	captureExplorer = new BrowserCapturesTreeProvider(() => loadExplorerCaptures(context));
 	context.subscriptions.push(vscode.window.registerTreeDataProvider('owenBrowserBridge.captures', captureExplorer));
 
@@ -400,6 +433,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.lm.registerTool('browser_read', createCategorizedBrowserTool(context, 'read')),
 		vscode.lm.registerTool('browser_interact', createCategorizedBrowserTool(context, 'interact')),
 		vscode.lm.registerTool('browser_workflow', createCategorizedBrowserTool(context, 'workflow')),
+		vscode.lm.registerTool('browser_agent', createBrowserAgentTool(context)),
 		vscode.lm.registerTool('browser_evidence', createCategorizedBrowserTool(context, 'evidence')),
 		vscode.lm.registerTool('browser_admin', createCategorizedBrowserTool(context, 'admin')),
 		vscode.lm.registerTool('browser_act', createBrowserActTool(context))
@@ -408,6 +442,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	if (getConfig().get<boolean>('autoStart', true)) {
 		await startServer(context, false);
 	}
+	return { registerAgentAction: plugin => agentActionPlugins.register(plugin) };
 }
 
 async function startServer(context: vscode.ExtensionContext, notify: boolean) {
@@ -862,7 +897,10 @@ function createSearchCapturesTool(context: vscode.ExtensionContext): vscode.Lang
 
 function createBrowserActTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<BrowserActInput> {
 	return {
-		async invoke(options) {
+		async invoke(options, token) {
+			if (options.input.action === 'planAndRun') {
+				return browserAgentToolResult(await runAdaptiveBrowserGoal(context, legacyPlanAndRunInput(options.input), token));
+			}
 			const { command, completion } = await invokeBrowserAction(context, options.input);
 			return new vscode.LanguageModelToolResult([
 				vscode.LanguageModelDataPart.json({ command, completion }),
@@ -877,10 +915,13 @@ function createBrowserActTool(context: vscode.ExtensionContext): vscode.Language
 
 function createCategorizedBrowserTool(context: vscode.ExtensionContext, category: BrowserActionCategory): vscode.LanguageModelTool<BrowserActInput> {
 	return {
-		async invoke(options) {
+		async invoke(options, token) {
 			const action = options.input.action as BrowserAction | undefined;
 			if (!action || !BROWSER_ACTIONS.includes(action) || getBrowserActionDefinition(action).category !== category) {
 				throw new Error(`browser_${category} requires an action in the ${category} category.`);
+			}
+			if (action === 'planAndRun') {
+				return browserAgentToolResult(await runAdaptiveBrowserGoal(context, legacyPlanAndRunInput(options.input), token));
 			}
 			const { command, completion } = await invokeBrowserAction(context, options.input);
 			return new vscode.LanguageModelToolResult([
@@ -892,6 +933,264 @@ function createCategorizedBrowserTool(context: vscode.ExtensionContext, category
 			return { invocationMessage: `Running ${category} browser action: ${options.input.action}` };
 		}
 	};
+}
+
+function createBrowserAgentTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<BrowserAgentInput> {
+	return {
+		async invoke(options, token) {
+			const operation = options.input.operation ?? 'run';
+			if (operation === 'get') {
+				const run = getStoredAgentRun(context, options.input.runId);
+				if (!run) {
+					throw new Error(options.input.runId ? `Browser Agent Run not found: ${options.input.runId}` : 'No Browser Agent Run has been stored.');
+				}
+				return browserAgentToolResult(run);
+			}
+			if (operation === 'cancel') {
+				if (!options.input.runId) {
+					throw new Error('browser_agent cancel requires runId.');
+				}
+				cancelledAgentRuns.add(options.input.runId);
+				return new vscode.LanguageModelToolResult([
+					vscode.LanguageModelDataPart.json({ runId: options.input.runId, cancellationRequested: true }),
+					new vscode.LanguageModelTextPart(`Cancellation requested for Browser Agent Run: ${options.input.runId}`)
+				]);
+			}
+
+			return browserAgentToolResult(await runAdaptiveBrowserGoal(context, options.input, token));
+		},
+		prepareInvocation(options) {
+			const operation = options.input.operation ?? 'run';
+			return { invocationMessage: operation === 'run' ? `Running browser goal: ${options.input.goal ?? ''}` : `${operation} Browser Agent Run ${options.input.runId ?? ''}` };
+		}
+	};
+}
+
+async function runAdaptiveBrowserGoal(context: vscode.ExtensionContext, input: BrowserAgentInput, token: vscode.CancellationToken) {
+	const previousRun = input.operation === 'resume' ? getStoredAgentRun(context, input.runId) : undefined;
+	if (input.operation === 'resume' && !previousRun) {
+		throw new Error(input.runId ? `Browser Agent Run not found: ${input.runId}` : 'browser_agent resume requires runId.');
+	}
+	if (previousRun && !['waiting_review', 'partial', 'failed', 'cancelled'].includes(previousRun.status)) {
+		throw new Error(`Browser Agent Run ${previousRun.runId} cannot resume from status ${previousRun.status}.`);
+	}
+	const goal = input.goal?.trim() || previousRun?.goal;
+	if (!goal) {
+		throw new Error('browser_agent run requires goal.');
+	}
+	const runId = previousRun?.runId || input.runId?.trim() || `agent-run-${formatTimestamp(new Date().toISOString())}-${crypto.randomBytes(3).toString('hex')}`;
+	cancelledAgentRuns.delete(runId);
+	const allowedActions: string[] = [
+		...BROWSER_ACTION_REGISTRY
+			.filter(definition => definition.category !== 'admin' && !AGENT_DISALLOWED_ACTIONS.has(definition.name))
+			.map(definition => definition.name),
+		...agentActionPlugins.listAutonomous().map(plugin => plugin.name)
+	];
+	const actionDescriptions = Object.fromEntries(agentActionPlugins.listAutonomous()
+		.map(plugin => [plugin.name, `${plugin.description} Capability: ${plugin.capability}; risk: ${plugin.risk}.`]));
+	const planner = await createLanguageModelPlanner({
+		modelId: input.modelId,
+		fallbackModelId: input.fallbackModelId,
+		allowedActions,
+		actionDescriptions,
+		token
+	});
+	const judge = await createLanguageModelJudge({ modelId: input.modelId, fallbackModelId: input.fallbackModelId, token });
+	const runner = new AgentRunner({
+		execute: action => executeAgentBrowserAction(context, action, input.targetAgentId),
+		decide: planner,
+		judge,
+		observe: observeAgentBrowserResult,
+		persist: run => storeAgentRun(context, run),
+		isCancelled: () => token.isCancellationRequested || cancelledAgentRuns.has(runId)
+	});
+
+	try {
+		return await runner.run(runId, goal, {
+			maxSteps: input.maxSteps,
+			maxRetriesPerStep: input.maxRetriesPerStep,
+			hardConstraints: [
+				'Use only allowed hosts and granted browser origins.',
+				'Do not enter or request passwords, MFA codes, tokens, cookies, or secrets.',
+				'Pause for operator review before destructive, approval, policy-change, download, upload, or bulk actions.',
+				...sanitizeStringList(input.hardConstraints)
+			],
+			requiredClaims: sanitizeStringList(input.requiredClaims)
+		}, previousRun);
+	} finally {
+		cancelledAgentRuns.delete(runId);
+	}
+}
+
+function legacyPlanAndRunInput(input: BrowserActInput): BrowserAgentInput {
+	const contractSelectors = sanitizeStringList(input.contractSelectors);
+	const contractTexts = sanitizeStringList(input.contractTexts);
+	const highlightSelectors = sanitizeStringList(input.highlightSelectors);
+	const hints = [
+		input.tableSelector ? `Prefer table selector: ${input.tableSelector}` : undefined,
+		input.waitPreset ? `Use readiness preset when useful: ${input.waitPreset}` : undefined,
+		contractSelectors.length > 0 ? `Expected selectors: ${contractSelectors.join(', ')}` : undefined,
+		contractTexts.length > 0 ? `Expected texts: ${contractTexts.join(', ')}` : undefined,
+		highlightSelectors.length > 0 ? `Evidence highlight selectors: ${highlightSelectors.join(', ')}` : undefined
+	].filter((value): value is string => Boolean(value));
+	return {
+		operation: 'run',
+		goal: input.goal,
+		hardConstraints: hints,
+		requiredClaims: input.requiredClaims,
+		targetAgentId: input.targetAgentId
+	};
+}
+
+async function executeAgentBrowserAction(context: vscode.ExtensionContext, action: AgentBrowserAction, targetAgentId?: string): Promise<AgentBrowserResult> {
+	try {
+		const customPlugin = agentActionPlugins.get(action.action);
+		if (customPlugin?.risk === 'destructive') {
+			return { ok: false, error: `Destructive custom action requires operator execution: ${action.action}`, reviewRequired: true };
+		}
+		if (AGENT_STATE_CHANGING_ACTIONS.has(action.action) || customPlugin?.capability === 'browser-write' || customPlugin?.risk === 'sensitive') {
+			const { completion: guardCompletion } = await invokeBrowserAction(context, {
+				action: 'sensitiveActionGuard',
+				actionTemplate: action as BrowserStepInput,
+				onViolation: 'block',
+				captureAfter: false,
+				includeScreenshot: false,
+				targetAgentId
+			});
+			const guardResult = extractFirstBrowserStepResult(guardCompletion.result);
+			if (guardResult?.decision === 'block') {
+				return {
+					ok: false,
+					error: `Sensitive browser action requires operator review: ${action.action}`,
+					reviewRequired: true,
+					raw: guardResult
+				};
+			}
+		}
+		if (customPlugin) {
+			return customPlugin.handler(action, {
+				executeBuiltIn: builtIn => {
+					if (agentActionPlugins.get(builtIn.action)) {
+						return Promise.resolve({ ok: false, error: 'Custom actions cannot invoke another custom action.' });
+					}
+					if (!BROWSER_ACTIONS.includes(builtIn.action as BrowserAction)) {
+						return Promise.resolve({ ok: false, error: `Unknown built-in browser action: ${builtIn.action}` });
+					}
+					return executeAgentBrowserAction(context, builtIn, targetAgentId);
+				}
+			});
+		}
+		const { completion } = await invokeBrowserAction(context, { ...action, targetAgentId } as BrowserActInput);
+		const authRequired = parseAuthRequiredResult(completion.result);
+		const reviewRequired = parseReviewRequiredResult(completion.result);
+		return {
+			ok: completion.ok !== false && !completion.error,
+			error: completion.error,
+			authRequired: completion.error === 'AUTH_REQUIRED' || Boolean(authRequired?.authRequired),
+			reviewRequired: completion.error === 'REVIEW_REQUIRED' || Boolean(reviewRequired?.reviewRequired),
+			browserState: redactBrowserStateForModel(extractBrowserSessionState(completion)),
+			raw: completion.result
+		};
+	} catch (error) {
+		return { ok: false, error: String(error instanceof Error ? error.message : error) };
+	}
+}
+
+function extractFirstBrowserStepResult(result: unknown) {
+	if (!result || typeof result !== 'object') {
+		return undefined;
+	}
+	const steps = (result as { steps?: Array<{ result?: Record<string, unknown> }> }).steps;
+	return Array.isArray(steps) ? steps[0]?.result : undefined;
+}
+
+function observeAgentBrowserResult(result: AgentBrowserResult) {
+	const state = result.browserState ?? {};
+	const screenSummary = state.screenSummary && typeof state.screenSummary === 'object' ? state.screenSummary : {};
+	const domHash = crypto.createHash('sha256').update(JSON.stringify(screenSummary)).digest('hex').slice(0, 16);
+	return {
+		url: String(state.url ?? ''),
+		title: typeof state.title === 'string' ? state.title : undefined,
+		tabId: typeof state.tabId === 'number' ? state.tabId : undefined,
+		targetId: typeof state.tabIndex === 'number' ? String(state.tabIndex) : undefined,
+		domHash,
+		elementCount: countScreenSummaryElements(screenSummary),
+		pageRevision: domHash
+	};
+}
+
+function countScreenSummaryElements(summary: object) {
+	const candidate = summary as Record<string, unknown>;
+	const counts = candidate.counts && typeof candidate.counts === 'object' ? candidate.counts as Record<string, unknown> : undefined;
+	if (counts) {
+		return Object.values(counts).reduce<number>((total, value) => total + (typeof value === 'number' ? value : 0), 0);
+	}
+	return ['interactables', 'formFields', 'headings', 'landmarks', 'tables']
+		.reduce((total, key) => total + (Array.isArray(candidate[key]) ? candidate[key].length : 0), 0);
+}
+
+function redactBrowserStateForModel(state: BrowserSessionState | undefined) {
+	if (!state) {
+		return undefined;
+	}
+	const serialized = redactSensitiveText(JSON.stringify(state), 'standard') ?? '{}';
+	try {
+		return JSON.parse(serialized) as Record<string, unknown>;
+	} catch {
+		return { url: state.url, title: state.title, updatedAt: state.updatedAt };
+	}
+}
+
+async function storeAgentRun(context: vscode.ExtensionContext, run: AgentRun) {
+	const runs = context.globalState.get<Record<string, AgentRun>>(AGENT_RUNS_STATE_KEY, {});
+	runs[run.runId] = run;
+	const retained = Object.fromEntries(Object.values(runs)
+		.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+		.slice(0, 50)
+		.map(item => [item.runId, item]));
+	await context.globalState.update(AGENT_RUNS_STATE_KEY, retained);
+}
+
+async function recoverInterruptedAgentRuns(context: vscode.ExtensionContext) {
+	const runs = context.globalState.get<Record<string, AgentRun>>(AGENT_RUNS_STATE_KEY, {});
+	let changed = false;
+	for (const [runId, run] of Object.entries(runs)) {
+		if (!['queued', 'observing', 'planning', 'acting', 'verifying'].includes(run.status)) {
+			continue;
+		}
+		runs[runId] = finalizeAgentRun(run, {
+			status: 'partial',
+			passed: false,
+			reason: 'The extension host stopped before this run completed. Resume the run to continue.',
+			missingClaims: []
+		});
+		changed = true;
+	}
+	if (changed) {
+		await context.globalState.update(AGENT_RUNS_STATE_KEY, runs);
+	}
+}
+
+function getStoredAgentRun(context: vscode.ExtensionContext, runId?: string) {
+	const runs = context.globalState.get<Record<string, AgentRun>>(AGENT_RUNS_STATE_KEY, {});
+	if (runId) {
+		return runs[runId];
+	}
+	return Object.values(runs).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+}
+
+function browserAgentToolResult(run: AgentRun) {
+	return new vscode.LanguageModelToolResult([
+		vscode.LanguageModelDataPart.json(run),
+		new vscode.LanguageModelTextPart([
+			`Browser Agent Run ${run.runId}: ${run.status}`,
+			`Goal: ${run.goal}`,
+			`Steps: ${run.stepsUsed}/${run.maxSteps}`,
+			`Plan revisions: ${run.planRevision}; replans: ${run.replanCount}`,
+			`Model requests: ${run.metrics.modelRequests}; fallbacks: ${run.metrics.fallbacks}; tokens: ${run.metrics.inputTokens} input / ${run.metrics.outputTokens} output`,
+			`Last event: ${run.events.at(-1)?.summary ?? 'none'}`
+		].join('\n'))
+	]);
 }
 
 async function invokeBrowserAction(context: vscode.ExtensionContext, input: BrowserActInput) {

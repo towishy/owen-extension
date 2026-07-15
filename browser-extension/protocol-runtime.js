@@ -18,9 +18,46 @@
     }
   }
 
+  function staleBatchReason(before, after, action) {
+    const terminatingActions = new Set(['navigate', 'openInNewTab', 'switchTab', 'back', 'forward', 'reload', 'closeTab']);
+    if (terminatingActions.has(String(action || ''))) {
+      return `action ${action} invalidates the current page state`;
+    }
+    if (!before || !after) {
+      return undefined;
+    }
+    if (before.tabId !== after.tabId) {
+      return 'active tab changed';
+    }
+    if (before.url !== after.url) {
+      return 'URL changed';
+    }
+    const mutatingActions = new Set(['click', 'type', 'scroll', 'keyPress', 'selectOption', 'clearInput', 'smartFormFill', 'rollbackToCheckpoint', 'tabOrchestrator', 'returnToTab']);
+    if (mutatingActions.has(String(action || '')) && before.domHash !== after.domHash) {
+      return 'DOM changed after a state-changing action';
+    }
+    if (before.activeElement !== after.activeElement && mutatingActions.has(String(action || ''))) {
+      return 'focused element changed after a state-changing action';
+    }
+    return undefined;
+  }
+
+  function navigationReadinessKind(previousUrl, changeInfo = {}, tab = {}) {
+    if (changeInfo.status === 'complete') {
+      return 'document';
+    }
+    const nextUrl = changeInfo.url || tab.url;
+    if (nextUrl && previousUrl && nextUrl !== previousUrl && changeInfo.status !== 'loading' && tab.status === 'complete') {
+      return 'same-document';
+    }
+    return undefined;
+  }
+
   globalThis.OwenProtocolRuntime = Object.freeze({
     protocolVersion: PROTOCOL_VERSION,
     retryDelay,
-    fetchWithTimeout
+    fetchWithTimeout,
+    staleBatchReason,
+    navigationReadinessKind
   });
 })();

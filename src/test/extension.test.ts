@@ -6,11 +6,23 @@ import * as path from 'node:path';
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
+import { AgentActionPluginRegistry } from '../agent-action-registry';
+import { AgentRunner, type AgentBrowserResult } from '../agent-runner';
+import {
+    compactAgentContext,
+    createAgentRun,
+    judgeCompletion,
+    recordObservation,
+    replacePlan,
+    shouldUseFallback,
+    staleBatchReason
+} from '../agent-runtime';
 import { BRIDGE_PROTOCOL_VERSION, BrowserAgentRegistry, requireCompatibleProtocol } from '../bridge-protocol';
 import { BROWSER_ACTIONS, BROWSER_ACTION_REGISTRY } from '../browser-actions';
 import { writeCaptureIntegrityManifest } from '../capture-integrity';
 import { CommandQueueError, ExpiringCommandQueue } from '../command-queue';
 import { isAllowedHost, normalizeAllowedHost } from '../host-policy';
+import { parseStructuredJson } from '../language-model-planner';
 import { redactSensitiveText } from '../redaction';
 
 suite('Extension Test Suite', () => {
@@ -93,6 +105,143 @@ suite('Extension Test Suite', () => {
 		assert.doesNotThrow(() => requireCompatibleProtocol(BRIDGE_PROTOCOL_VERSION));
 		assert.throws(() => requireCompatibleProtocol('2.0'), /protocol mismatch/);
 		assert.throws(() => requireCompatibleProtocol(undefined), /received missing/);
+	});
+
+	test('agent runtime clamps budgets and detects repeated observations', () => {
+		let run = createAgentRun('run-1', 'Review the incident', { maxSteps: 500, maxRetriesPerStep: 9 });
+		assert.strictEqual(run.maxSteps, 50);
+		assert.strictEqual(run.maxRetriesPerStep, 3);
+		for (let index = 0; index < 3; index += 1) {
+			run = recordObservation(run, { url: 'https://security.microsoft.com/incidents#overview', domHash: 'same', elementCount: 10 });
+		}
+		assert.strictEqual(run.repetitionCount, 3);
+		assert.strictEqual(compactAgentContext(run).replanRequired, true);
+	});
+
+	test('agent runtime compacts plan, constraints, facts, and recent events', () => {
+		let run = createAgentRun('run-2', 'Collect evidence', { hardConstraints: ['read only', 'read only'] });
+		run = replacePlan(run, [{ goal: 'Inspect the page', completionCriteria: ['page ready'] }]);
+		run = recordObservation(run, { url: 'https://security.microsoft.com', title: 'Security' });
+		const context = compactAgentContext(run, 1);
+		assert.deepStrictEqual(context.hardConstraints, ['read only']);
+		assert.strictEqual(context.plan[0].status, 'active');
+		assert.strictEqual(context.recentEvents.length, 1);
+	});
+
+	test('agent runtime invalidates stale write batches after page changes', () => {
+		const before = { url: 'https://example.com/a', tabId: 1, domHash: 'before', pageRevision: '1' };
+		assert.strictEqual(staleBatchReason(before, { ...before, url: 'https://example.com/b' }, false), 'URL changed');
+		assert.strictEqual(staleBatchReason(before, { ...before, domHash: 'after' }, true), 'DOM changed after a state-changing action');
+		assert.strictEqual(staleBatchReason(before, before, true), undefined);
+	});
+
+	test('agent runtime judges completion from evidence instead of action success', () => {
+		assert.strictEqual(judgeCompletion({}).status, 'partial');
+		assert.strictEqual(judgeCompletion({ authRequired: true }).status, 'waiting_review');
+		assert.strictEqual(judgeCompletion({ requiredClaims: ['severity'], verifiedClaims: [] }).status, 'partial');
+		assert.strictEqual(judgeCompletion({ requiredClaims: ['severity'], verifiedClaims: ['severity'], contractPassed: true }).status, 'completed');
+	});
+
+	test('agent runtime limits fallback to recoverable model failures', () => {
+		assert.strictEqual(shouldUseFallback(new Error('Model output was truncated')), true);
+		assert.strictEqual(shouldUseFallback(new Error('Invalid JSON schema response')), true);
+		assert.strictEqual(shouldUseFallback(new Error('Host is not allowed')), false);
+	});
+
+	test('agent runner observes after every state-changing action and completes with evidence', async () => {
+		const actions: string[] = [];
+		const persisted: string[] = [];
+		let decisionCount = 0;
+		const runner = new AgentRunner({
+			execute: async action => {
+				actions.push(action.action);
+				return { ok: true, browserState: { url: 'https://example.com', domHash: `state-${actions.length}` } };
+			},
+			observe: result => ({
+				url: String(result.browserState?.url),
+				domHash: String(result.browserState?.domHash)
+			}),
+			decide: async () => {
+				decisionCount += 1;
+				return decisionCount === 1
+					? { evaluation: 'Page is ready.', memory: 'Ready.', nextGoal: 'Open details.', action: { action: 'click', targetHint: 'Details' } }
+					: {
+						evaluation: 'Details are visible.', memory: 'Evidence collected.', nextGoal: 'Finish.', done: true,
+						completionEvidence: { requiredClaims: ['details'], verifiedClaims: ['details'], assertionsPassed: true }
+					};
+			},
+			persist: async run => { persisted.push(run.status); }
+		});
+
+		const run = await runner.run('run-test', 'Open details', { maxSteps: 4 });
+		assert.deepStrictEqual(actions, ['readPage', 'click', 'readPage']);
+		assert.strictEqual(run.status, 'completed');
+		assert.ok(persisted.includes('verifying'));
+	});
+
+	test('agent runner stops for authentication instead of replanning', async () => {
+		const authResult: AgentBrowserResult = { ok: false, authRequired: true };
+		const runner = new AgentRunner({
+			execute: async () => authResult,
+			observe: () => ({ url: '' }),
+			decide: async () => ({ evaluation: '', memory: '', nextGoal: '' })
+		});
+		const run = await runner.run('run-auth', 'Read portal');
+		assert.strictEqual(run.status, 'waiting_review');
+	});
+
+	test('agent runner resumes with existing plan, history, and metrics', async () => {
+		let previous = createAgentRun('run-resume', 'Resume evidence review');
+		previous = replacePlan(previous, [{ goal: 'Verify evidence', completionCriteria: ['evidence visible'] }]);
+		previous = recordObservation(previous, { url: 'https://example.com', domHash: 'before' });
+		const runner = new AgentRunner({
+			execute: async () => ({ ok: true, browserState: { url: 'https://example.com', domHash: 'after' } }),
+			observe: result => ({ url: String(result.browserState?.url), domHash: String(result.browserState?.domHash) }),
+			decide: async () => ({
+				evaluation: 'Evidence is visible.', memory: 'Verified.', nextGoal: 'Finish.', done: true,
+				completionEvidence: { evidenceComplete: true }
+			})
+		});
+
+		const resumed = await runner.run(previous.runId, previous.goal, {}, previous);
+		assert.strictEqual(resumed.status, 'completed');
+		assert.strictEqual(resumed.createdAt, previous.createdAt);
+		assert.strictEqual(resumed.planRevision, 1);
+		assert.ok(resumed.events.some(event => event.summary === 'Run resumed by the operator.'));
+		assert.ok(resumed.metrics.observations > previous.metrics.observations);
+	});
+
+	test('custom agent action registry enforces namespace, risk, and disposal', () => {
+		const registry = new AgentActionPluginRegistry();
+		assert.throws(() => registry.register({
+			name: 'custom.write' as const,
+			description: 'Unsafe low-risk write.',
+			capability: 'browser-write',
+			risk: 'low',
+			handler: async () => ({ ok: true })
+		}), /must be sensitive or destructive/);
+		const disposable = registry.register({
+			name: 'custom.collect-evidence',
+			description: 'Collect domain-specific evidence.',
+			capability: 'evidence',
+			risk: 'low',
+			handler: async () => ({ ok: true })
+		});
+		registry.register({
+			name: 'custom.delete-policy',
+			description: 'Delete a policy.',
+			capability: 'browser-write',
+			risk: 'destructive',
+			handler: async () => ({ ok: true })
+		});
+		assert.deepStrictEqual(registry.listAutonomous().map(plugin => plugin.name), ['custom.collect-evidence']);
+		disposable.dispose();
+		assert.strictEqual(registry.get('custom.collect-evidence'), undefined);
+	});
+
+	test('language model planner parses fenced JSON and rejects truncated output', () => {
+		assert.deepStrictEqual(parseStructuredJson<{ done: boolean }>('```json\n{"done":true}\n```'), { done: true });
+		assert.throws(() => parseStructuredJson('{"done":'), /truncated/);
 	});
 
 	test('bridge HTTP protocol leases, acknowledges, completes, and deduplicates results', async function () {

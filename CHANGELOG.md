@@ -6,6 +6,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-07-15
+
+- Added a VS Code-hosted adaptive Browser Agent Runtime with plan/progress state, one-action observation loops, loop detection, context compaction, deterministic evidence judgement, optional model judgement, and recoverable-only model fallback.
+- Added the `browser_agent` tool with run, resume, get, and cancel operations, bounded local run history, model/token/fallback metrics, cancellation, and extension-host restart recovery.
+- Routed legacy `planAndRun` tool calls through the adaptive Agent Runtime while preserving table, readiness, contract, and highlight hints; explicit workflows and browser jobs remain deterministic executors.
+- Added sensitive-action review enforcement, autonomous action restrictions, and browser-side stale batch invalidation after navigation, tab, URL, focus, or DOM changes.
+- Added a limited `custom.*` Agent Action plugin API with capability/risk metadata, destructive-action exclusion, namespace validation, and custom-action recursion prevention.
+- Added Agent Runtime, resume, custom action registry, protocol stale-state, and schema drift tests plus operator and AI-agent documentation.
+
 ## [0.1.29] - 2026-07-14
 
 - Fixed empty Copilot tool responses by returning user-readable tool output as `LanguageModelTextPart` while retaining structured JSON data parts.

@@ -10,6 +10,8 @@ const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const protocolRuntime = readFileSync(join(root, 'browser-extension', 'protocol-runtime.js'), 'utf8');
 const tools = packageJson.contributes.languageModelTools;
 
+assertEqual(toolOperations('browser_agent'), ['run', 'resume', 'get', 'cancel'], 'browser_agent');
+
 assertEqual(toolActions('browser_act'), BROWSER_ACTIONS, 'browser_act');
 for (const toolName of ['browser_act', 'browser_read', 'browser_interact', 'browser_workflow', 'browser_evidence', 'browser_admin']) {
   const tool = tools.find(item => item.name === toolName);
@@ -43,6 +45,14 @@ function toolActions(name) {
     throw new Error(`Missing language model tool: ${name}`);
   }
   return tool.inputSchema?.properties?.action?.enum ?? [];
+}
+
+function toolOperations(name) {
+  const tool = tools.find(item => item.name === name);
+  if (!tool) {
+    throw new Error(`Missing language model tool: ${name}`);
+  }
+  return tool.inputSchema?.properties?.operation?.enum ?? [];
 }
 
 function assertEqual(actual, expected, label) {
