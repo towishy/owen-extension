@@ -16,7 +16,6 @@ const elements = {
   screenshotRedaction: document.getElementById('screenshotRedaction'),
   agentId: document.getElementById('agentId'),
   connectionStatus: document.getElementById('connectionStatus'),
-  grantSite: document.getElementById('grantSite'),
   save: document.getElementById('save'),
   status: document.getElementById('status'),
   statusLabel: document.getElementById('statusLabel'),
@@ -37,18 +36,6 @@ elements.save.addEventListener('click', async () => {
     elements.save.disabled = false;
     elements.save.textContent = 'Save changes';
   }, 900);
-});
-
-elements.grantSite.addEventListener('click', async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.url || !/^https?:/i.test(tab.url)) {
-    setFeedback('Open an HTTP(S) page before granting access.');
-    return;
-  }
-  const origin = `${new URL(tab.url).origin}/*`;
-  const granted = await chrome.permissions.request({ origins: [origin] });
-  setFeedback(granted ? `Access allowed for ${new URL(tab.url).hostname}.` : 'Site access was not granted.');
-  await updateSiteAccess();
 });
 
 elements.includeScreenshot.addEventListener('change', updateScreenshotControls);
@@ -93,7 +80,6 @@ async function loadOptions() {
   const connection = localSecrets.owenBridgeConnectionStatus;
   updateConnectionStatus(connection);
   updateScreenshotControls();
-  await updateSiteAccess();
 }
 
 async function saveOptions() {
@@ -132,21 +118,6 @@ function updateConnectionStatus(connection) {
     elements.connectionHelp.textContent = 'Open VS Code with Owen Browser Bridge enabled.';
     setStatus('Waiting', 'waiting');
   }
-}
-
-async function updateSiteAccess() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.url || !/^https?:/i.test(tab.url)) {
-    elements.grantSite.textContent = 'Open a website to allow access';
-    elements.grantSite.disabled = true;
-    return;
-  }
-  const origin = `${new URL(tab.url).origin}/*`;
-  const granted = await chrome.permissions.contains({ origins: [origin] });
-  elements.grantSite.textContent = granted
-    ? `Access allowed for ${new URL(tab.url).hostname}`
-    : 'Allow access to current site';
-  elements.grantSite.disabled = granted;
 }
 
 function updateScreenshotControls() {

@@ -58,6 +58,12 @@ function validateBrowserExtension() {
   if (!Array.isArray(manifest.permissions) || !manifest.permissions.includes('storage')) {
     throw new Error('browser-extension manifest must include storage permission');
   }
+  if (!Array.isArray(manifest.host_permissions) || !manifest.host_permissions.includes('<all_urls>')) {
+    throw new Error('browser-extension manifest must include permanent <all_urls> access for passive agent operation');
+  }
+  if (Array.isArray(manifest.optional_host_permissions) && manifest.optional_host_permissions.length > 0) {
+    throw new Error('browser-extension manifest must not require optional per-site host permissions');
+  }
   for (const file of ['protocol-runtime.js', 'background.js', 'popup.js']) {
     const result = spawnSync(process.execPath, ['--check', join(browserDir, file)], { stdio: 'inherit' });
     if (result.status !== 0) {

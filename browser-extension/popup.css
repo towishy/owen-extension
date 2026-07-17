@@ -492,17 +492,6 @@ summary small {
   transition: transform 120ms ease, border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 
-.button.secondary {
-  width: 100%;
-  min-width: 0;
-  background: var(--surface-strong);
-}
-
-.button.secondary:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
 .button.primary {
   min-width: 112px;
   border-color: var(--accent);

@@ -6,6 +6,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-07-17
+
+- Restored permanent browser host access for passive-agent capture and removed the per-site permission button, runtime gate, and setup instructions.
+
 ## [0.1.30] - 2026-07-15
 
 - Added a VS Code-hosted adaptive Browser Agent Runtime with plan/progress state, one-action observation loops, loop detection, context compaction, deterministic evidence judgement, optional model judgement, and recoverable-only model fallback.

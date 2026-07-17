@@ -139,6 +139,12 @@ After both extensions are installed, follow [Pairing Setup](#pairing-setup).
 
 The README keeps only the four most recent release highlights. See the full [CHANGELOG](CHANGELOG.md) or [GitHub Releases](https://github.com/towishy/owen-extension/releases) for complete history and downloadable assets.
 
+### 0.1.31
+
+- Restored permanent browser host access so the passive agent can capture allowed pages without a per-site approval step.
+- Removed the site-access button, permission gate, and obsolete setup and troubleshooting guidance.
+- Added release validation that prevents optional per-site permissions from being reintroduced.
+
 ### 0.1.30
 
 - Added an adaptive Browser Agent Runtime with plan/progress tracking, loop-aware replanning, context compaction, evidence-based completion judgement, and constrained model fallback.
@@ -153,15 +159,9 @@ The README keeps only the four most recent release highlights. See the full [CHA
 
 ### 0.1.28
 
-- Redesigned the passive-agent popup around bridge health, compact capture controls, current-site permission state, and collapsible connection settings.
+- Redesigned the passive-agent popup around bridge health, compact capture controls, and collapsible connection settings.
 - Added live connection updates, pairing-token visibility, screenshot-dependent redaction controls, and clearer status guidance.
 - Removed the manual investigation-name default so capture groups are supplied only by Copilot commands.
-
-### 0.1.27
-
-- Added protocol 3.0 command leases, ACK/completion ownership, idempotent result delivery, a persisted browser outbox, and retry backoff.
-- Added persistent browser-agent identities, explicit multi-agent routing, optional per-site browser permissions, and durable workflow runtime state.
-- Added the Browser Captures Explorer, SHA-256 capture manifests, storage status and deletion commands, release checksums, and one-release/one-tag retention automation.
 
 ## Pairing Setup
 
@@ -189,9 +189,8 @@ If the token ever needs to be replaced, click **Regenerate and Copy Token** and 
 4. Paste the copied token into **Pairing Token**.
 5. Optionally enter an **Investigation / Case** name such as `incident-12345` to group multiple tab captures together.
 6. Keep **Accept Copilot browser actions** enabled if you want Copilot to send safe browser actions through the paired extension.
-7. On the target HTTPS page, click **Allow access to current site**. The browser extension requests access only for that origin; permanent `<all_urls>` access is not used.
-8. Choose whether to include **screenshot** and **HTML snapshot**.
-9. Click **Save changes**.
+7. Choose whether to include **screenshot** and **HTML snapshot**.
+8. Click **Save changes**.
 
 ### 4. Control and capture the active browser page from VS Code
 
@@ -235,8 +234,6 @@ Open the extracted folders until `manifest.json` is visible, then select that ex
 ### If the browser says a host is not allowed
 
 Open `Owen Browser Bridge: Open Setup Page`, then use **Allowed Hosts** to add, edit, or remove accepted hosts. Exact hosts, full URLs, and wildcards such as `*.microsoft.com` are supported. Click **Allow All Domains** to accept captures and Copilot browser actions from any host, or **Restore Microsoft Defaults** to return to the default Microsoft security/admin portal list.
-
-If the result is `HOST_PERMISSION_REQUIRED`, open the browser popup while the target page is active and click **Allow access to current site**. VS Code Allowed Hosts and browser site permission are separate checks; both must allow the target.
 
 ### Change the capture directory
 
@@ -535,7 +532,7 @@ When a `v*` tag is pushed to GitHub, `.github/workflows/release.yml` runs the sa
 - The server binds to `127.0.0.1` only.
 - Browser requests require the pairing token stored in VS Code SecretStorage.
 - Copilot browser actions require the same pairing token and the browser popup's **Accept Copilot browser actions** toggle.
-- Browser page access is requested per origin through optional host permissions; the manifest permanently allows only the loopback bridge hosts.
+- The browser extension has permanent web-page access for passive operation; VS Code Allowed Hosts still limits which pages accept captures and browser actions.
 - Default allowed hosts are Microsoft security/admin portals.
 - Browser actions are limited to allowed hosts and refuse to type into password fields.
 - Email addresses, IPv4 addresses, GUIDs, and bearer tokens are redacted before storage.

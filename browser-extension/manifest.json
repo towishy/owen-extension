@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Owen Browser Bridge Agent",
   "description": "Send browser page text, metadata, and screenshots to Owen Browser Bridge in VS Code.",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "action": {
     "default_title": "Open Owen Browser Bridge Agent",
     "default_popup": "popup.html"
@@ -18,11 +18,6 @@
     "tabs"
   ],
   "host_permissions": [
-    "http://127.0.0.1/*",
-    "http://localhost/*"
-  ],
-  "optional_host_permissions": [
-    "https://*/*",
-    "http://*/*"
+    "<all_urls>"
   ]
 }

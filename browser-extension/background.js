@@ -208,7 +208,6 @@ async function acknowledgeBrowserCommand(options, command, agentId) {
 async function executeBrowserCommand(command, options) {
   try {
     await ensureRuntimeStateLoaded();
-    await requireCommandHostPermissions(command);
     const workflow = command.action === 'runWorkflow' ? normalizeWorkflowSteps(command.steps) : [command];
     const executionTrail = [];
     let beforeAfterDiff;
@@ -303,24 +302,6 @@ async function executeBrowserCommand(command, options) {
     }
 
     return { id: command.id, ok: false, error: message };
-  }
-}
-
-async function requireCommandHostPermissions(command) {
-  const requestedUrls = [command.url, ...(Array.isArray(command.urls) ? command.urls : [])].filter(value => /^https?:/i.test(String(value || '')));
-  if (requestedUrls.length === 0) {
-    const activeTab = await getActiveTab();
-    if (activeTab.url) {
-      requestedUrls.push(activeTab.url);
-    }
-  }
-
-  for (const value of requestedUrls) {
-    const origin = `${new URL(value).origin}/*`;
-    const granted = await chrome.permissions.contains({ origins: [origin] });
-    if (!granted) {
-      throw new Error(`HOST_PERMISSION_REQUIRED: Open the browser popup on ${new URL(value).origin} and choose Grant current site access.`);
-    }
   }
 }
 
