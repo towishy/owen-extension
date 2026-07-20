@@ -38,39 +38,78 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          retry() {
+            local attempt=1
+            local max_attempts=12
+            until "$@"; do
+              if [ "${attempt}" -ge "${max_attempts}" ]; then
+                echo "Command failed after ${max_attempts} attempts: $*" >&2
+                return 1
+              fi
+              echo "Command failed on attempt ${attempt}; retrying in 30 seconds: $*" >&2
+              attempt=$((attempt + 1))
+              sleep 30
+            done
+          }
+
           VERSION=$(node -p "require('./package.json').version")
           VSIX="dist/owen-browser-bridge-${VERSION}.vsix"
           BROWSER_ZIP="dist/owen-browser-capture-browser-extension-${VERSION}.zip"
           CHECKSUMS="dist/SHA256SUMS.txt"
           TAG="${VERSION}"
 
-          if gh release view "${TAG}" >/dev/null 2>&1; then
-            gh release upload "${TAG}" "${VSIX}" "${BROWSER_ZIP}" "${CHECKSUMS}" --clobber
-            gh release edit "${TAG}" --draft=false --latest
-          else
-            gh release create "${TAG}" "${VSIX}" "${BROWSER_ZIP}" "${CHECKSUMS}" --title "${VERSION}" --generate-notes
-          fi
+          ensure_release() {
+            local output
+            if output=$(gh release view "${TAG}" 2>&1); then
+              return 0
+            fi
+            if echo "${output}" | grep -qi "release not found"; then
+              gh release create "${TAG}" --draft --title "${VERSION}" --generate-notes
+              return
+            fi
+            echo "${output}" >&2
+            return 1
+          }
+
+          retry ensure_release
+          retry gh release upload "${TAG}" "${VSIX}" "${BROWSER_ZIP}" "${CHECKSUMS}" --clobber
+          retry gh release edit "${TAG}" --draft=false --latest
 
       - name: Retain only the current release and tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          retry() {
+            local attempt=1
+            local max_attempts=12
+            until "$@"; do
+              if [ "${attempt}" -ge "${max_attempts}" ]; then
+                echo "Command failed after ${max_attempts} attempts: $*" >&2
+                return 1
+              fi
+              echo "Command failed on attempt ${attempt}; retrying in 30 seconds: $*" >&2
+              attempt=$((attempt + 1))
+              sleep 30
+            done
+          }
+
           VERSION=$(node -p "require('./package.json').version")
           CURRENT_TAG="${VERSION}"
 
-          gh release list --limit 1000 --json tagName --jq '.[].tagName' | while IFS= read -r RELEASE_TAG; do
+          RELEASE_TAGS=$(retry gh release list --limit 1000 --json tagName --jq '.[].tagName')
+          while IFS= read -r RELEASE_TAG; do
             if [ -n "${RELEASE_TAG}" ] && [ "${RELEASE_TAG}" != "${CURRENT_TAG}" ]; then
-              gh release delete "${RELEASE_TAG}" --yes
+              retry gh release delete "${RELEASE_TAG}" --yes
             fi
-          done
+          done <<< "${RELEASE_TAGS}"
 
           git ls-remote --tags --refs origin | awk '{ sub("refs/tags/", "", $2); print $2 }' | while IFS= read -r REMOTE_TAG; do
             if [ -n "${REMOTE_TAG}" ] && [ "${REMOTE_TAG}" != "${CURRENT_TAG}" ]; then
-              git push origin --delete "${REMOTE_TAG}"
+              retry git push origin --delete "${REMOTE_TAG}"
             fi
           done
 
-          RELEASES=$(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+          RELEASES=$(retry gh release list --limit 1000 --json tagName --jq '.[].tagName')
           TAGS=$(git ls-remote --tags --refs origin | awk '{ sub("refs/tags/", "", $2); print $2 }')
           [ "${RELEASES}" = "${CURRENT_TAG}" ] || { echo "Expected only release ${CURRENT_TAG}, found: ${RELEASES}"; exit 1; }
           [ "${TAGS}" = "${CURRENT_TAG}" ] || { echo "Expected only tag ${CURRENT_TAG}, found: ${TAGS}"; exit 1; }

@@ -12,6 +12,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Added health-monitored bridge ownership takeover after the owner window closes and routed secondary-window browser actions through the shared command endpoint.
 - Added authenticated shared browser-state lookup so secondary windows do not keep reporting stale tab state.
 - Standardized GitHub release and tag names on bare semantic versions without a `v` prefix.
+- Added bounded retries for transient GitHub API and release asset upload failures.
 
 ## [0.1.31] - 2026-07-17
 
