@@ -522,7 +522,7 @@ The release check compiles and lints the VS Code extension, runs protocol and HT
 
 Upload all three files to the GitHub Release for the same version tag.
 
-When a `v*` tag is pushed to GitHub, `.github/workflows/release.yml` runs the same `npm run release:check` process and creates or updates the release. Only after the current assets upload successfully, the workflow deletes every older GitHub Release and remote tag, then verifies that exactly the current release and tag remain.
+When a bare semantic-version tag such as `0.1.32` is pushed to GitHub, `.github/workflows/release.yml` runs the same `npm run release:check` process and creates or updates the release with the same name. Do not prefix release or tag names with `v`. Only after the current assets upload successfully, the workflow deletes every older GitHub Release and remote tag, then verifies that exactly the current release and tag remain.
 
 ## Settings
 

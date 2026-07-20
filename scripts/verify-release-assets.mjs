@@ -40,7 +40,7 @@ for (const file of ['manifest.json', 'protocol-runtime.js', 'background.js', 'po
   }
 }
 
-console.log(`Verified release assets for v${version}:`);
+console.log(`Verified release assets for ${version}:`);
 console.log(`- dist/${vsixName}`);
 console.log(`- dist/${zipName}`);
 console.log('- dist/SHA256SUMS.txt');

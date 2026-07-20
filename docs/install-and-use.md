@@ -365,4 +365,4 @@ This command verifies protocol 3.0, the 82-action registry, browser JavaScript s
 
 Attach all three files to the GitHub Release. The VSIX installs the VS Code side, and the ZIP is extracted and loaded as the unpacked Chrome/Edge browser extension.
 
-Pushing a `v*` tag also triggers `.github/workflows/release.yml`. After the current release and all three assets are created successfully, the workflow removes every older GitHub Release and remote tag and verifies that exactly the current release and tag remain.
+Pushing a bare semantic-version tag such as `0.1.32` also triggers `.github/workflows/release.yml` and creates a release with the same name. Do not prefix release or tag names with `v`. After the current release and all three assets are created successfully, the workflow removes every older GitHub Release and remote tag and verifies that exactly the current release and tag remain.
