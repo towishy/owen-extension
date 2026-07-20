@@ -6,6 +6,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-07-20
+
+- Prevented multi-window `EADDRINUSE` activation failures by sharing one localhost bridge owner across VS Code windows.
+- Added health-monitored bridge ownership takeover after the owner window closes and routed secondary-window browser actions through the shared command endpoint.
+- Added authenticated shared browser-state lookup so secondary windows do not keep reporting stale tab state.
+
 ## [0.1.31] - 2026-07-17
 
 - Restored permanent browser host access for passive-agent capture and removed the per-site permission button, runtime gate, and setup instructions.

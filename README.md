@@ -174,6 +174,8 @@ Use this once after installing the VS Code extension and the browser extension.
 3. Click **Start Server**.
 4. The server listens on `127.0.0.1:17321` by default.
 
+When several VS Code windows are open, one window owns the localhost server and the others connect to it automatically. If the owner window closes, a remaining window detects the loss and takes over the port automatically. Do not assign a different port per VS Code window.
+
 ### 2. Copy the pairing token
 
 1. On the setup page, click **Copy Pairing Token**.
@@ -224,6 +226,10 @@ Captured files are stored in the folder shown under **Capture Directory** on the
 3. Generate a fresh token with **Regenerate and Copy Token**, paste it into the popup, and click **Save changes**.
 4. Check that local firewall or endpoint policy is not blocking loopback traffic to `127.0.0.1`.
 5. Reload the browser extension and run `Developer: Reload Window` in VS Code.
+
+The pairing token is stored per Chrome or Edge profile. If Edge opens a different profile, pair that profile once or return to the already paired profile. The popup's stable agent id distinguishes paired profiles when more than one is active.
+
+Multiple VS Code windows share one bridge owner on the configured port. Seeing another Owen Browser Bridge process on `127.0.0.1:17321` is expected; secondary windows proxy commands to it and take over automatically when it closes.
 
 Never paste the pairing token into chat, issue trackers, screenshots, or committed files.
 

@@ -372,6 +372,9 @@ type ReviewRequiredResult = {
 };
 
 let server: http.Server | undefined;
+let sharedBridgeBaseUrl: string | undefined;
+let sharedBridgeMonitor: NodeJS.Timeout | undefined;
+let sharedBridgeRecoveryInProgress = false;
 let output: vscode.OutputChannel;
 let setupPanel: vscode.WebviewPanel | undefined;
 let captureExplorer: BrowserCapturesTreeProvider | undefined;
@@ -459,25 +462,42 @@ async function startServer(context: vscode.ExtensionContext, notify: boolean) {
 		? testPort
 		: getConfig().get<number>('port', 17321);
 
-	server = http.createServer(async (request, response) => {
-		try {
-			await handleRequest(context, request, response);
-		} catch (error) {
-			output.appendLine(`Request failed: ${String(error)}`);
-			writeJson(response, 500, { error: 'internal_error' });
+	const baseUrl = `http://127.0.0.1:${port}`;
+	if (sharedBridgeBaseUrl && await isCompatibleSharedBridge(sharedBridgeBaseUrl)) {
+		startSharedBridgeMonitor(context);
+		if (notify) {
+			vscode.window.showInformationMessage(`Owen Browser Bridge is using the shared server on 127.0.0.1:${port}.`);
 		}
-	});
+		return;
+	}
+	sharedBridgeBaseUrl = undefined;
 
-	try {
-		await new Promise<void>((resolve, reject) => {
-			server?.once('error', reject);
-			server?.listen(port, '127.0.0.1', () => resolve());
-		});
-	} catch (error) {
-		server = undefined;
-		throw error;
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		const candidate = createBridgeServer(context);
+		server = candidate;
+		try {
+			await listenBridgeServer(candidate, port);
+			break;
+		} catch (error) {
+			server = undefined;
+			if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE' && await waitForCompatibleSharedBridge(baseUrl)) {
+				sharedBridgeBaseUrl = baseUrl;
+				startSharedBridgeMonitor(context);
+				output.appendLine(`Connected to shared Owen Browser Bridge owner at ${baseUrl}`);
+				if (notify) {
+					vscode.window.showInformationMessage(`Owen Browser Bridge connected to the shared server on 127.0.0.1:${port}.`);
+				}
+				return;
+			}
+			if (attempt === 1 || (error as NodeJS.ErrnoException).code !== 'EADDRINUSE') {
+				throw error;
+			}
+			output.appendLine(`Shared bridge owner disappeared during startup; retrying port ownership on ${baseUrl}`);
+		}
 	}
 
+	sharedBridgeBaseUrl = undefined;
+	stopSharedBridgeMonitor();
 	output.appendLine(`Listening on http://127.0.0.1:${port}`);
 	if (notify) {
 		vscode.window.showInformationMessage(`Owen Browser Bridge listening on 127.0.0.1:${port}.`);
@@ -485,7 +505,9 @@ async function startServer(context: vscode.ExtensionContext, notify: boolean) {
 }
 
 async function stopServer(notify: boolean) {
+	stopSharedBridgeMonitor();
 	if (!server) {
+		sharedBridgeBaseUrl = undefined;
 		if (notify) {
 			vscode.window.showInformationMessage('Owen Browser Bridge server is not running.');
 		}
@@ -496,9 +518,66 @@ async function stopServer(notify: boolean) {
 		server?.close(error => error ? reject(error) : resolve());
 	});
 	server = undefined;
-	output.appendLine('Server stopped.');
+	sharedBridgeBaseUrl = undefined;
 	if (notify) {
+		output.appendLine('Server stopped.');
 		vscode.window.showInformationMessage('Owen Browser Bridge server stopped.');
+	}
+}
+
+function createBridgeServer(context: vscode.ExtensionContext) {
+	return http.createServer(async (request, response) => {
+		try {
+			await handleRequest(context, request, response);
+		} catch (error) {
+			output.appendLine(`Request failed: ${String(error)}`);
+			writeJson(response, 500, { error: 'internal_error' });
+		}
+	});
+}
+
+function listenBridgeServer(candidate: http.Server, port: number) {
+	return new Promise<void>((resolve, reject) => {
+		candidate.once('error', reject);
+		candidate.listen(port, '127.0.0.1', () => resolve());
+	});
+}
+
+function startSharedBridgeMonitor(context: vscode.ExtensionContext) {
+	if (sharedBridgeMonitor) {
+		return;
+	}
+	sharedBridgeMonitor = setInterval(() => {
+		void recoverSharedBridgeOwner(context);
+	}, 5000);
+	sharedBridgeMonitor.unref();
+}
+
+function stopSharedBridgeMonitor() {
+	if (sharedBridgeMonitor) {
+		clearInterval(sharedBridgeMonitor);
+		sharedBridgeMonitor = undefined;
+	}
+}
+
+async function recoverSharedBridgeOwner(context: vscode.ExtensionContext) {
+	if (sharedBridgeRecoveryInProgress || server || !sharedBridgeBaseUrl) {
+		return;
+	}
+	sharedBridgeRecoveryInProgress = true;
+	const previousBaseUrl = sharedBridgeBaseUrl;
+	try {
+		if (await isCompatibleSharedBridge(previousBaseUrl)) {
+			return;
+		}
+		sharedBridgeBaseUrl = undefined;
+		output.appendLine(`Shared bridge owner is unavailable; attempting automatic takeover of ${previousBaseUrl}`);
+		await startServer(context, false);
+	} catch (error) {
+		sharedBridgeBaseUrl = previousBaseUrl;
+		output.appendLine(`Automatic shared bridge takeover failed; will retry: ${String(error)}`);
+	} finally {
+		sharedBridgeRecoveryInProgress = false;
 	}
 }
 
@@ -524,6 +603,15 @@ async function handleRequest(context: vscode.ExtensionContext, request: http.Inc
 			activeAgents: browserAgents.listActive(),
 			metrics: commandMetrics
 		});
+		return;
+	}
+
+	if (request.url === '/browser/state' && request.method === 'GET') {
+		if (!await isAuthorized(context, request)) {
+			writeJson(response, 401, { error: 'unauthorized' });
+			return;
+		}
+		writeJson(response, 200, { state: context.globalState.get<BrowserSessionState>('latestBrowserState') ?? null });
 		return;
 	}
 
@@ -825,7 +913,7 @@ function createLatestCaptureTool(context: vscode.ExtensionContext): vscode.Langu
 function createBrowserStateTool(context: vscode.ExtensionContext): vscode.LanguageModelTool<object> {
 	return {
 		async invoke() {
-			const state = context.globalState.get<BrowserSessionState>('latestBrowserState');
+			const state = await getLatestBrowserState(context);
 			if (!state) {
 				return new vscode.LanguageModelToolResult([
 					new vscode.LanguageModelTextPart('No browser state has been captured yet. Use #browserAct with readPage or capture first.')
@@ -1194,6 +1282,23 @@ function browserAgentToolResult(run: AgentRun) {
 }
 
 async function invokeBrowserAction(context: vscode.ExtensionContext, input: BrowserActInput) {
+	await ensureBridgeAvailable(context);
+	if (!server && sharedBridgeBaseUrl) {
+		try {
+			return await invokeSharedBrowserAction(context, sharedBridgeBaseUrl, input);
+		} catch (error) {
+			if (!(error instanceof SharedBridgeUnavailableError)) {
+				throw error;
+			}
+			output.appendLine(`Shared bridge owner became unavailable; attempting takeover: ${error.message}`);
+			sharedBridgeBaseUrl = undefined;
+			await startServer(context, false);
+			if (!server && sharedBridgeBaseUrl) {
+				return invokeSharedBrowserAction(context, sharedBridgeBaseUrl, input);
+			}
+		}
+	}
+
 	const resumeRequested = (input.action as BrowserAction | undefined) === 'resumeAfterAuth';
 	const targetAgentId = browserAgents.resolveTarget(input.targetAgentId, getConfig().get<string>('preferredAgentId'));
 	const command = resumeRequested
@@ -1206,6 +1311,99 @@ async function invokeBrowserAction(context: vscode.ExtensionContext, input: Brow
 	}
 
 	return { command, completion };
+}
+
+async function ensureBridgeAvailable(context: vscode.ExtensionContext) {
+	if (server) {
+		return;
+	}
+	if (sharedBridgeBaseUrl && await isCompatibleSharedBridge(sharedBridgeBaseUrl)) {
+		return;
+	}
+	sharedBridgeBaseUrl = undefined;
+	await startServer(context, false);
+}
+
+async function invokeSharedBrowserAction(context: vscode.ExtensionContext, baseUrl: string, input: BrowserActInput) {
+	const token = await ensurePairingToken(context);
+	let response: Response;
+	try {
+		response = await fetch(`${baseUrl}/commands/enqueue`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'X-Owen-Bridge-Token': token
+			},
+			body: JSON.stringify(input),
+			signal: AbortSignal.timeout(clampTimeout(input.timeoutMs) + 45000)
+		});
+	} catch (error) {
+		throw new SharedBridgeUnavailableError(String(error instanceof Error ? error.message : error));
+	}
+
+	const body = await response.json().catch(() => ({})) as {
+		command?: BrowserCommand;
+		completion?: BrowserCommandCompletion;
+		error?: string;
+	};
+	if (!response.ok || !body.command || !body.completion) {
+		throw new Error(body.error || `Shared Owen Browser Bridge request failed with HTTP ${response.status}.`);
+	}
+	await updateLatestBrowserState(context, extractBrowserSessionState(body.completion), body.completion.storedCapture);
+	return { command: body.command, completion: body.completion };
+}
+
+class SharedBridgeUnavailableError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'SharedBridgeUnavailableError';
+	}
+}
+
+async function getLatestBrowserState(context: vscode.ExtensionContext) {
+	await ensureBridgeAvailable(context);
+	if (!server && sharedBridgeBaseUrl) {
+		const token = await ensurePairingToken(context);
+		try {
+			const response = await fetch(`${sharedBridgeBaseUrl}/browser/state`, {
+				headers: { 'X-Owen-Bridge-Token': token },
+				signal: AbortSignal.timeout(3000)
+			});
+			if (response.ok) {
+				const body = await response.json() as { state?: BrowserSessionState | null };
+				if (body.state) {
+					await updateLatestBrowserState(context, body.state, undefined);
+					return body.state;
+				}
+			}
+		} catch (error) {
+			output.appendLine(`Unable to read shared browser state: ${String(error)}`);
+		}
+	}
+	return context.globalState.get<BrowserSessionState>('latestBrowserState');
+}
+
+async function waitForCompatibleSharedBridge(baseUrl: string) {
+	for (let attempt = 0; attempt < 10; attempt += 1) {
+		if (await isCompatibleSharedBridge(baseUrl)) {
+			return true;
+		}
+		await new Promise(resolve => setTimeout(resolve, 100));
+	}
+	return false;
+}
+
+async function isCompatibleSharedBridge(baseUrl: string) {
+	try {
+		const response = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1000) });
+		if (!response.ok) {
+			return false;
+		}
+		const health = await response.json() as { service?: string; protocolVersion?: string };
+		return health.service === 'owen-browser-bridge' && health.protocolVersion === BRIDGE_PROTOCOL_VERSION;
+	} catch {
+		return false;
+	}
 }
 
 const SUPPORTED_BROWSER_ACTIONS: readonly BrowserAction[] = BROWSER_ACTIONS;

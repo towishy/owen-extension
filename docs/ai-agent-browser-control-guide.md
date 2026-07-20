@@ -534,7 +534,8 @@ If a capture is stored, prefer analyzing the Markdown plus adjacent JSON. Use sc
 | `unauthorized` | Pairing token mismatch | Copy token from VS Code setup page and paste into browser extension |
 | `host_not_allowed` | URL host not in allowed list | Add host in setup page or VS Code settings |
 | Multiple browser agents | More than one active agent and no target selected | Pass `targetAgentId` or set `owenBrowserBridge.preferredAgentId` |
-| Command times out | Browser extension polling disabled or tab hung | Enable browser actions, reload extension, retry with larger `timeoutMs` |
+| Another VS Code window owns port `17321` | A second extension host shares the same bridge port | No action needed; secondary windows proxy to the owner and take over after it closes |
+| Command times out | Browser extension polling disabled, Edge opened an unpaired profile, or tab hung | Enable browser actions, pair the active Edge profile once, reload the extension, then retry |
 | `AUTH_REQUIRED` | Portal redirected to sign-in | User completes sign-in, then call `resumeAfterAuth` |
 | `REVIEW_REQUIRED` | Manual gate not approved | Re-run with the expected `approvalKeyword` in `value` after operator approval |
 | Empty extraction | Selector mismatch or SPA not ready | Run `listInteractables`, `semanticWait`, then retry |

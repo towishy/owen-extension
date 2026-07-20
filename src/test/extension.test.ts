@@ -259,6 +259,8 @@ suite('Extension Test Suite', () => {
 			const agentId = 'integration-agent';
 			const nextUrl = `http://127.0.0.1:${port}/commands/next?protocolVersion=${BRIDGE_PROTOCOL_VERSION}&agentId=${agentId}&waitMs=5000`;
 			assert.strictEqual((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
+			assert.strictEqual((await fetch(`http://127.0.0.1:${port}/browser/state`)).status, 401);
+			assert.strictEqual((await fetch(`http://127.0.0.1:${port}/browser/state`, { headers })).status, 200);
 			assert.strictEqual((await fetch(nextUrl)).status, 401);
 			assert.strictEqual((await fetch(`http://127.0.0.1:${port}/commands/next?protocolVersion=2.0&agentId=${agentId}`, { headers })).status, 409);
 			assert.strictEqual((await fetch(nextUrl, { headers })).status, 200);
@@ -279,7 +281,20 @@ suite('Extension Test Suite', () => {
 				method: 'POST', headers, body: JSON.stringify({ id: commandId, agentId })
 			})).status, 200);
 
-			const result = { id: commandId, agentId, ok: true, result: { action: 'readPage', steps: [] } };
+			const result = {
+				id: commandId,
+				agentId,
+				ok: true,
+				result: {
+					action: 'readPage',
+					steps: [],
+					browserSession: {
+						url: 'https://example.com/current',
+						title: 'Current browser state',
+						updatedAt: '2026-07-20T00:00:00.000Z'
+					}
+				}
+			};
 			const wrongResult = await fetch(`http://127.0.0.1:${port}/commands/result`, {
 				method: 'POST', headers, body: JSON.stringify({ ...result, agentId: 'wrong-agent' })
 			});
@@ -288,6 +303,9 @@ suite('Extension Test Suite', () => {
 			assert.strictEqual((await fetch(`http://127.0.0.1:${port}/commands/result`, {
 				method: 'POST', headers, body: JSON.stringify(result)
 			})).status, 200);
+			const browserState = await fetch(`http://127.0.0.1:${port}/browser/state`, { headers });
+			assert.strictEqual(browserState.status, 200);
+			assert.strictEqual((await browserState.json() as { state?: { url?: string } }).state?.url, 'https://example.com/current');
 			assert.strictEqual((await fetch(`http://127.0.0.1:${port}/commands/result`, {
 				method: 'POST', headers, body: JSON.stringify(result)
 			})).status, 200);
