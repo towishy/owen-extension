@@ -1,5 +1,5 @@
 export const BROWSER_ACTIONS = [
-	'readPage', 'capture', 'click', 'type', 'navigate', 'waitForText', 'wait', 'waitPreset', 'scroll', 'hover', 'keyPress',
+	'readPage', 'mediaExtract', 'capture', 'click', 'type', 'navigate', 'waitForText', 'wait', 'waitPreset', 'scroll', 'hover', 'keyPress',
 	'selectOption', 'clearInput', 'back', 'forward', 'reload', 'openInNewTab', 'switchTab', 'closeTab',
 	'listInteractables', 'inspectTargets', 'captureElement', 'captureRegion', 'journeyCapture', 'paginateCapture', 'smartFormFill', 'conditionalWorkflow',
 	'multiTabCrawl', 'runtimeSnapshot', 'domDiffTimeline', 'ocrSnapshot', 'dataGapGuard', 'exportReplay', 'networkTraceCapture',

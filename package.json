@@ -2,7 +2,7 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.32",
+  "version": "0.1.33",
   "publisher": "towishy",
   "license": "UNLICENSED",
   "repository": {
@@ -282,6 +282,7 @@
               "type": "string",
               "enum": [
                 "readPage",
+                "mediaExtract",
                 "waitForText",
                 "wait",
                 "waitPreset",
@@ -316,6 +317,26 @@
             },
             "targetHint": {
               "type": "string"
+            },
+            "url": {
+              "type": "string",
+              "description": "Optional public page URL used to enrich rendered media results from the active paired tab."
+            },
+            "mediaType": {
+              "type": "string",
+              "enum": [
+                "all",
+                "image",
+                "video",
+                "audio"
+              ],
+              "description": "Media kind returned by mediaExtract. Defaults to all."
+            },
+            "maxItems": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 500,
+              "description": "Maximum deduplicated media results. Defaults to 100."
             },
             "timeoutMs": {
               "type": "number"
@@ -726,6 +747,7 @@
               "type": "string",
               "enum": [
                 "readPage",
+                "mediaExtract",
                 "capture",
                 "click",
                 "type",
@@ -1256,6 +1278,16 @@
               ],
               "description": "Output format for tableExtract results."
             },
+            "mediaType": {
+              "type": "string",
+              "enum": [
+                "all",
+                "image",
+                "video",
+                "audio"
+              ],
+              "description": "Media kind returned by mediaExtract. Defaults to all."
+            },
             "checkpointName": {
               "type": "string",
               "description": "Checkpoint name for stateCheckpoint and rollbackToCheckpoint."
@@ -1299,7 +1331,8 @@
             },
             "maxItems": {
               "type": "number",
-              "description": "Maximum items processed by bulkActionFromList."
+              "maximum": 500,
+              "description": "Maximum items processed by bulkActionFromList or returned by mediaExtract."
             },
             "semanticConditions": {
               "type": "array",
@@ -1547,5 +1580,8 @@
     "eslint": "^9.39.3",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2"
   }
 }

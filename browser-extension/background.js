@@ -420,6 +420,10 @@ async function executeSingleActionCore(command, allowedHosts) {
     return runNetworkTraceCapture(command, allowedHosts);
   }
 
+  if (action === 'mediaExtract') {
+    return runMediaExtract(command, allowedHosts);
+  }
+
   if (action === 'safeDownloadAndHash') {
     return runSafeDownloadAndHash(command, allowedHosts);
   }
@@ -992,6 +996,29 @@ async function runNetworkTraceCapture(command, allowedHosts) {
     args: [command.urlIncludes, command.maxEntries]
   });
   return result ?? { ok: true, trace: [] };
+}
+
+async function runMediaExtract(command, allowedHosts) {
+  const tab = await getActiveTab();
+  assertAllowedUrl(tab.url, allowedHosts);
+  if (command.url) {
+    assertAllowedUrl(command.url, allowedHosts);
+  }
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: collectRenderedMedia,
+    args: [command.mediaType, command.maxItems]
+  });
+  return result ?? {
+    ok: true,
+    pageUrl: tab.url,
+    pageTitle: tab.title,
+    candidates: [],
+    strategies: [],
+    warnings: ['Rendered media collection returned no result.'],
+    complete: false,
+    truncated: false
+  };
 }
 
 async function runSafeDownloadAndHash(command, allowedHosts) {
@@ -4758,6 +4785,211 @@ async function getOptions() {
     await chrome.storage.sync.remove('token');
   }
   return { ...DEFAULT_OPTIONS, ...syncedOptions, token };
+}
+
+function collectRenderedMedia(mediaType, maxItems) {
+  const filter = ['image', 'video', 'audio'].includes(mediaType) ? mediaType : 'all';
+  const limit = Math.min(Math.max(Math.trunc(Number(maxItems) || 100), 1), 500);
+  const candidatesByUrl = new Map();
+  const warnings = [];
+  const strategies = new Set();
+  const mediaExtension = /\.(?:avif|bmp|gif|jpe?g|png|svg|webp|m4a|mp3|ogg|oga|wav|aac|flac|m3u8|mp4|m4v|mov|webm|ogv|mpd)(?:$|[?#])/i;
+  const videoExtension = /\.(?:m3u8|mp4|m4v|mov|webm|ogv|mpd)(?:$|[?#])/i;
+  const audioExtension = /\.(?:m4a|mp3|ogg|oga|wav|aac|flac)(?:$|[?#])/i;
+  const sourcePriority = { platform: 7, element: 6, network: 5, 'json-ld': 4, metadata: 3, css: 2, script: 1 };
+  const signedKeys = new Set(['expires', 'expiry', 'exp', 'oe', 'oh', 'signature', 'sig', 'token', 'policy', 'key-pair-id']);
+
+  const inferKind = (url, mimeType) => {
+    const mime = String(mimeType || '').toLowerCase();
+    if (mime.startsWith('video/') || videoExtension.test(url)) { return 'video'; }
+    if (mime.startsWith('audio/') || audioExtension.test(url)) { return 'audio'; }
+    return 'image';
+  };
+  const finiteNumber = value => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : undefined;
+  const isEphemeral = url => {
+    if (url.protocol === 'blob:') { return true; }
+    const keys = new Set([...url.searchParams.keys()].map(key => key.toLowerCase()));
+    return [...signedKeys].some(key => keys.has(key)) || /(?:cdninstagram|fbcdn)\./i.test(url.hostname);
+  };
+  const add = (value, kind, source, extra = {}) => {
+    if (!value || (filter !== 'all' && filter !== kind)) { return; }
+    let url;
+    try {
+      url = new URL(String(value).replace(/\\u0026/gi, '&').replace(/\\\//g, '/'), document.baseURI);
+    } catch {
+      return;
+    }
+    if (!['http:', 'https:', 'blob:'].includes(url.protocol)) {
+      if (url.protocol === 'data:' && !warnings.includes('Inline data URLs were omitted to keep the result bounded.')) {
+        warnings.push('Inline data URLs were omitted to keep the result bounded.');
+      }
+      return;
+    }
+    const candidate = {
+      url: url.href,
+      kind,
+      source,
+      mimeType: extra.mimeType || undefined,
+      thumbnailUrl: extra.thumbnailUrl || undefined,
+      width: finiteNumber(extra.width),
+      height: finiteNumber(extra.height),
+      durationSeconds: finiteNumber(extra.durationSeconds),
+      ephemeral: isEphemeral(url)
+    };
+    const existing = candidatesByUrl.get(candidate.url);
+    if (!existing || sourcePriority[candidate.source] > sourcePriority[existing.source]) {
+      candidatesByUrl.set(candidate.url, candidate);
+    }
+    strategies.add(source);
+  };
+  const addSrcset = (value, kind, source, extra) => {
+    for (const item of String(value || '').split(',')) {
+      const url = item.trim().split(/\s+/)[0];
+      if (url) { add(url, kind, source, extra); }
+    }
+  };
+
+  for (const element of document.querySelectorAll('meta[property],meta[name],meta[itemprop]')) {
+    const key = String(element.getAttribute('property') || element.getAttribute('name') || element.getAttribute('itemprop') || '').toLowerCase();
+    const content = element.getAttribute('content');
+    if (/^(?:(?:og|twitter):image(?::src|:url|:secure_url)?|image|thumbnailurl)$/.test(key)) { add(content, 'image', 'metadata'); }
+    if (/^(?:(?:og|twitter):video(?::url|:secure_url)?|twitter:player:stream|video|contenturl)$/.test(key)) { add(content, 'video', 'metadata'); }
+    if (/^og:audio(?::url|:secure_url)?$/.test(key)) { add(content, 'audio', 'metadata'); }
+  }
+
+  for (const image of document.images) {
+    const extra = { width: image.naturalWidth, height: image.naturalHeight };
+    add(image.currentSrc || image.src, 'image', 'element', extra);
+    addSrcset(image.srcset, 'image', 'element', extra);
+    add(image.dataset.src || image.dataset.lazySrc || image.dataset.original, 'image', 'element', extra);
+  }
+  for (const video of document.querySelectorAll('video')) {
+    const extra = { width: video.videoWidth, height: video.videoHeight, durationSeconds: video.duration, thumbnailUrl: video.poster || undefined };
+    add(video.currentSrc || video.src, 'video', 'element', extra);
+    add(video.dataset.src || video.dataset.lazySrc, 'video', 'element', extra);
+    add(video.poster, 'image', 'element', { width: video.videoWidth, height: video.videoHeight });
+    for (const source of video.querySelectorAll('source')) {
+      add(source.src, 'video', 'element', { ...extra, mimeType: source.type });
+      addSrcset(source.srcset, 'video', 'element', { ...extra, mimeType: source.type });
+    }
+    if (video.mediaKeys && !warnings.includes('Encrypted Media Extensions are active; DRM-protected streams are not extracted or bypassed.')) {
+      warnings.push('Encrypted Media Extensions are active; DRM-protected streams are not extracted or bypassed.');
+    }
+  }
+  for (const audio of document.querySelectorAll('audio')) {
+    add(audio.currentSrc || audio.src, 'audio', 'element', { durationSeconds: audio.duration });
+    for (const source of audio.querySelectorAll('source')) {
+      add(source.src, 'audio', 'element', { mimeType: source.type, durationSeconds: audio.duration });
+    }
+  }
+  for (const source of document.querySelectorAll('picture source[srcset]')) {
+    addSrcset(source.srcset, 'image', 'element', { mimeType: source.type });
+  }
+  for (const link of document.querySelectorAll('a[href],link[href]')) {
+    const href = link.href;
+    const mimeType = link.type || '';
+    if (href && (mediaExtension.test(href) || /^(?:image|video|audio)\//i.test(mimeType))) {
+      add(href, inferKind(href, mimeType), 'element', { mimeType });
+    }
+  }
+  for (const element of document.querySelectorAll('embed[src],object[data]')) {
+    const value = element.getAttribute('src') || element.getAttribute('data');
+    const mimeType = element.getAttribute('type') || '';
+    if (value && (mediaExtension.test(value) || /^(?:image|video|audio)\//i.test(mimeType))) {
+      add(value, inferKind(value, mimeType), 'element', { mimeType });
+    }
+  }
+
+  const collectJsonLd = (value, inheritedKind, depth = 0) => {
+    if (depth > 20) { return; }
+    if (Array.isArray(value)) {
+      for (const item of value) { collectJsonLd(item, inheritedKind, depth + 1); }
+      return;
+    }
+    if (!value || typeof value !== 'object') { return; }
+    const type = String(value['@type'] || '').toLowerCase();
+    const kind = type.includes('video') ? 'video' : type.includes('audio') ? 'audio' : type.includes('image') ? 'image' : inheritedKind;
+    for (const [key, item] of Object.entries(value)) {
+      const normalizedKey = key.toLowerCase();
+      const keyKind = normalizedKey.includes('video') ? 'video' : normalizedKey.includes('audio') ? 'audio' : normalizedKey.includes('image') || normalizedKey.includes('thumbnail') ? 'image' : kind;
+      if (typeof item === 'string' && keyKind && ['contenturl', 'embedurl', 'thumbnailurl', 'image', 'video', 'audio', 'url'].includes(normalizedKey)) {
+        add(item, keyKind, 'json-ld');
+      } else {
+        collectJsonLd(item, keyKind, depth + 1);
+      }
+    }
+  };
+  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+    try {
+      collectJsonLd(JSON.parse(script.textContent || ''));
+    } catch {
+      warnings.push('Ignored malformed JSON-LD while extracting rendered media.');
+    }
+  }
+
+  const styleElements = [...document.querySelectorAll('[style],img,video,[class]')].slice(0, 2000);
+  if (styleElements.length === 2000) {
+    warnings.push('CSS background inspection was limited to 2,000 elements.');
+  }
+  for (const element of styleElements) {
+    const background = getComputedStyle(element).backgroundImage;
+    for (const match of background.matchAll(/url\((?:"|')?(.+?)(?:"|')?\)/g)) {
+      add(match[1], 'image', 'css');
+    }
+  }
+
+  for (const entry of performance.getEntriesByType('resource')) {
+    const mimeHint = entry.initiatorType === 'img' ? 'image/' : entry.initiatorType === 'video' ? 'video/' : entry.initiatorType === 'audio' ? 'audio/' : '';
+    if (mimeHint || mediaExtension.test(entry.name)) {
+      add(entry.name, inferKind(entry.name, mimeHint), 'network', { mimeType: mimeHint || undefined });
+    }
+  }
+
+  let inspectedScriptCharacters = 0;
+  for (const script of document.scripts) {
+    if (script.type === 'application/ld+json' || script.src || inspectedScriptCharacters >= 1_000_000) { continue; }
+    const text = String(script.textContent || '').slice(0, 1_000_000 - inspectedScriptCharacters);
+    inspectedScriptCharacters += text.length;
+    const matches = text.match(/https?:\\?\/\\?\/[^\s"'<>]+/gi) || [];
+    for (const match of matches) {
+      const url = match.replace(/\\u0026/gi, '&').replace(/\\\//g, '/').replace(/[),;]+$/, '');
+      if (mediaExtension.test(url)) { add(url, inferKind(url), 'script'); }
+    }
+  }
+  if (inspectedScriptCharacters >= 1_000_000) {
+    warnings.push('Inline script media inspection was limited to 1 MB.');
+  }
+
+  const crossOriginFrames = [...document.querySelectorAll('iframe[src]')].filter(frame => {
+    try { return new URL(frame.src, document.baseURI).origin !== location.origin; } catch { return false; }
+  }).length;
+  if (crossOriginFrames > 0) {
+    warnings.push(`${crossOriginFrames} cross-origin frame(s) could not be inspected from the current page context.`);
+  }
+  if ([...candidatesByUrl.values()].some(candidate => candidate.url.startsWith('blob:'))) {
+    warnings.push('Blob media URLs are tab-scoped and cannot be reused after the page session ends.');
+  }
+
+  const allCandidates = [...candidatesByUrl.values()];
+  const truncated = allCandidates.length > limit;
+  if (truncated) {
+    warnings.push(`Media results were limited to ${limit} items.`);
+  }
+  return {
+    ok: true,
+    pageUrl: location.href,
+    pageTitle: document.title,
+    candidates: allCandidates.slice(0, limit),
+    strategies: [...strategies],
+    warnings,
+    complete: !truncated && crossOriginFrames === 0 && !warnings.some(item => item.includes('DRM-protected')),
+    truncated,
+    stats: {
+      discovered: allCandidates.length,
+      returned: Math.min(allCandidates.length, limit),
+      crossOriginFrames
+    }
+  };
 }
 
 function collectPageSnapshot(includeHtml) {

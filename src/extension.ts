@@ -13,6 +13,7 @@ import { writeCaptureIntegrityManifest } from './capture-integrity';
 import { ExpiringCommandQueue } from './command-queue';
 import { isAllowedHost, normalizeAllowedHost } from './host-policy';
 import { createLanguageModelJudge, createLanguageModelPlanner } from './language-model-planner';
+import { deduplicateCandidates, extractPublicMediaFromUrl, type MediaCandidate } from './media-extractor';
 import { redactSensitiveText, type RedactionProfile } from './redaction';
 
 type BrowserCapturePayload = {
@@ -158,6 +159,7 @@ type BrowserStepInput = {
 	tableSelector?: string;
 	headerMode?: 'auto' | 'thead' | 'firstRow';
 	outputFormat?: 'json' | 'csv';
+	mediaType?: 'all' | 'image' | 'video' | 'audio';
 	checkpointName?: string;
 	includeFormState?: boolean;
 	strictUrlMatch?: boolean;
@@ -287,6 +289,7 @@ type BrowserCommand = Required<Pick<BrowserActInput, 'action' | 'timeoutMs' | 'c
 	tableSelector?: string;
 	headerMode?: 'auto' | 'thead' | 'firstRow';
 	outputFormat?: 'json' | 'csv';
+	mediaType: 'all' | 'image' | 'video' | 'audio';
 	checkpointName?: string;
 	includeFormState: boolean;
 	strictUrlMatch: boolean;
@@ -1192,6 +1195,105 @@ function extractFirstBrowserStepResult(result: unknown) {
 	return Array.isArray(steps) ? steps[0]?.result : undefined;
 }
 
+async function enrichMediaExtractCompletion(command: BrowserCommand, completion: BrowserCommandCompletion) {
+	const envelope = completion.result && typeof completion.result === 'object'
+		? completion.result as { steps?: Array<{ result?: Record<string, unknown> }> }
+		: undefined;
+	const rendered = envelope?.steps?.[0]?.result;
+	if (!rendered) {
+		return;
+	}
+
+	const renderedPageUrl = typeof rendered.pageUrl === 'string' ? rendered.pageUrl : undefined;
+	const sourceUrl = command.url || renderedPageUrl;
+	if (command.url && renderedPageUrl && !sameMediaPage(command.url, renderedPageUrl)) {
+		completion.ok = false;
+		completion.error = 'MEDIA_SOURCE_MISMATCH';
+		rendered.ok = false;
+		rendered.error = 'The explicit media source URL does not match the active paired browser page. Navigate to the source page first or omit url.';
+		return;
+	}
+
+	const renderedCandidates = Array.isArray(rendered.candidates)
+		? rendered.candidates.filter(isMediaCandidate)
+		: [];
+	const warnings = Array.isArray(rendered.warnings)
+		? rendered.warnings.filter((item): item is string => typeof item === 'string')
+		: [];
+	const strategies = Array.isArray(rendered.strategies)
+		? rendered.strategies.filter((item): item is string => typeof item === 'string')
+		: [];
+	let publicCandidates: MediaCandidate[] = [];
+	let publicComplete = false;
+	if (sourceUrl) {
+		try {
+			const publicExtraction = await extractPublicMediaFromUrl(sourceUrl, {
+				mediaType: command.mediaType,
+				maxItems: command.maxItems,
+				timeoutMs: command.timeoutMs
+			});
+			publicCandidates = publicExtraction.candidates;
+			publicComplete = publicExtraction.complete;
+			warnings.push(...publicExtraction.warnings);
+			strategies.push(...publicExtraction.strategies.map(strategy => `public:${strategy}`));
+		} catch (error) {
+			warnings.push(`Public source enrichment was unavailable: ${String(error instanceof Error ? error.message : error)}`);
+		}
+	}
+
+	const merged = deduplicateCandidates([...renderedCandidates, ...publicCandidates]);
+	const truncated = merged.length > command.maxItems;
+	const candidates = merged.slice(0, command.maxItems);
+	if (truncated) {
+		warnings.push(`Merged media results were limited to ${command.maxItems} items.`);
+	}
+	if (candidates.some(candidate => candidate.ephemeral)) {
+		warnings.push('Short-lived or tab-scoped media URLs are present. Use an operator-reviewed download workflow before they expire.');
+	}
+	Object.assign(rendered, {
+		candidates,
+		strategies: [...new Set(strategies)],
+		warnings: [...new Set(warnings)],
+		truncated: Boolean(rendered.truncated) || truncated,
+		complete: Boolean(rendered.complete) && publicComplete && !truncated,
+		stats: {
+			...(rendered.stats && typeof rendered.stats === 'object' ? rendered.stats : {}),
+			rendered: renderedCandidates.length,
+			publicSource: publicCandidates.length,
+			returned: candidates.length
+		}
+	});
+
+	if (candidates.length === 0) {
+		completion.ok = false;
+		completion.error = 'NO_MEDIA_FOUND';
+		rendered.ok = false;
+		rendered.error = 'No media URLs were found. The page may require interaction, use inaccessible cross-origin frames, or serve protected media.';
+	}
+}
+
+function sameMediaPage(left: string, right: string) {
+	try {
+		const leftUrl = new URL(left);
+		const rightUrl = new URL(right);
+		const normalizePath = (value: string) => value.length > 1 ? value.replace(/\/+$/, '') : value;
+		return leftUrl.origin === rightUrl.origin && normalizePath(leftUrl.pathname) === normalizePath(rightUrl.pathname);
+	} catch {
+		return false;
+	}
+}
+
+function isMediaCandidate(value: unknown): value is MediaCandidate {
+	if (!value || typeof value !== 'object') {
+		return false;
+	}
+	const candidate = value as Partial<MediaCandidate>;
+	return typeof candidate.url === 'string'
+		&& ['image', 'video', 'audio'].includes(String(candidate.kind))
+		&& ['element', 'metadata', 'json-ld', 'script', 'css', 'network', 'platform'].includes(String(candidate.source))
+		&& typeof candidate.ephemeral === 'boolean';
+}
+
 function observeAgentBrowserResult(result: AgentBrowserResult) {
 	const state = result.browserState ?? {};
 	const screenSummary = state.screenSummary && typeof state.screenSummary === 'object' ? state.screenSummary : {};
@@ -1305,6 +1407,9 @@ async function invokeBrowserAction(context: vscode.ExtensionContext, input: Brow
 		? createResumeBrowserCommand(context, targetAgentId)
 		: createBrowserCommand(input, targetAgentId);
 	const completion = await enqueueBrowserCommand(command);
+	if (command.action === 'mediaExtract') {
+		await enrichMediaExtractCompletion(command, completion);
+	}
 	const authRequired = parseAuthRequiredResult(completion.result);
 	if (authRequired?.authRequired && authRequired.resumeInput) {
 		await context.globalState.update('pendingAuthResumeInput', authRequired.resumeInput);
@@ -1479,6 +1584,7 @@ function createBrowserCommand(input: BrowserActInput, targetAgentId?: string): B
 		tableSelector: input.tableSelector,
 		headerMode: input.headerMode,
 		outputFormat: input.outputFormat,
+		mediaType: input.mediaType === 'image' || input.mediaType === 'video' || input.mediaType === 'audio' ? input.mediaType : 'all',
 		checkpointName: input.checkpointName,
 		includeFormState: input.includeFormState ?? true,
 		strictUrlMatch: input.strictUrlMatch ?? false,
@@ -1488,7 +1594,7 @@ function createBrowserCommand(input: BrowserActInput, targetAgentId?: string): B
 		matchText: input.matchText,
 		matchMode: input.matchMode,
 		actionTemplate: input.actionTemplate,
-		maxItems: clampMaxItems(input.maxItems),
+		maxItems: action === 'mediaExtract' ? clampMediaMaxItems(input.maxItems) : clampMaxItems(input.maxItems),
 		semanticConditions: sanitizeStringList(input.semanticConditions),
 		baseRunId: input.baseRunId,
 		newRunId: input.newRunId,
@@ -1514,7 +1620,7 @@ function createBrowserCommand(input: BrowserActInput, targetAgentId?: string): B
 		steps: [...presetSteps, ...workflowSteps],
 		preset: input.preset,
 		timeoutMs,
-		captureAfter: input.captureAfter ?? (action !== 'listInteractables' && action !== 'inspectTargets'),
+		captureAfter: input.captureAfter ?? (action !== 'listInteractables' && action !== 'inspectTargets' && action !== 'mediaExtract'),
 		includeScreenshot: input.includeScreenshot ?? true,
 		includeHtml: input.includeHtml ?? false,
 		captureBeforeAfter: Boolean(input.captureBeforeAfter),
@@ -1707,6 +1813,20 @@ function validateBrowserStep(step: BrowserStepInput, allowedHosts: string[], top
 		if (allowedHosts.length > 0 && !isAllowedHost(pageUrl.hostname, allowedHosts)) {
 			throw new Error(`Navigation host is not allowed: ${pageUrl.hostname}`);
 		}
+	}
+
+	if (action === 'mediaExtract' && step.url) {
+		const pageUrl = parseUrl(step.url);
+		if (!pageUrl) {
+			throw new Error('browserAct mediaExtract url must be a valid absolute URL.');
+		}
+		if (allowedHosts.length > 0 && !isAllowedHost(pageUrl.hostname, allowedHosts)) {
+			throw new Error(`Media source host is not allowed: ${pageUrl.hostname}`);
+		}
+	}
+
+	if (action === 'mediaExtract' && step.mediaType && !['all', 'image', 'video', 'audio'].includes(step.mediaType)) {
+		throw new Error('browserAct mediaExtract mediaType must be all, image, video, or audio.');
 	}
 
 	if ((action === 'click' || action === 'hover') && !step.selector && !step.text && !step.label && !step.targetHint) {
@@ -2207,6 +2327,14 @@ function clampMaxItems(value: number | undefined) {
 	}
 
 	return Math.min(Math.max(Math.trunc(value), 1), 200);
+}
+
+function clampMediaMaxItems(value: number | undefined) {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return 100;
+	}
+
+	return Math.min(Math.max(Math.trunc(value), 1), 500);
 }
 
 function clampRegionCoordinate(value: number | undefined) {

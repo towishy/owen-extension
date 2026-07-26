@@ -6,6 +6,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-07-27
+
+- Added the read-only `mediaExtract` action for deduplicated image, video, and audio discovery across rendered elements, Open Graph/Twitter metadata, JSON-LD, CSS backgrounds, resource timing, bounded inline scripts, and public source responses.
+- Added an Instagram public-post adapter that uses the captioned embed response, escape-aware `contextJSON` decoding, single/carousel normalization, and original `video_url` selection instead of cover images.
+- Added explicit completeness, truncation, ephemeral-URL, cross-origin frame, DRM, source mismatch, and zero-result contracts without bypassing authentication or restricted content.
+- Added private/loopback/link-local source-fetch protection, a minimal public-source user agent, production dependency auditing, and five media parser regression tests.
+- Updated VSIX packaging to include production runtime dependencies required by the structured HTML parser.
+
 ## [0.1.32] - 2026-07-20
 
 - Prevented multi-window `EADDRINUSE` activation failures by sharing one localhost bridge owner across VS Code windows.

@@ -9,7 +9,7 @@ const distDir = join(root, 'dist');
 const outputPath = join(distDir, `owen-browser-bridge-${packageJson.version}.vsix`);
 const vsceEntry = join(root, 'node_modules', '@vscode', 'vsce', 'vsce');
 const command = process.execPath;
-const args = [vsceEntry, 'package', '--no-dependencies', '--out', outputPath];
+const args = [vsceEntry, 'package', '--out', outputPath];
 
 mkdirSync(distDir, { recursive: true });
 

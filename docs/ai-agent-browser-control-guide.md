@@ -144,6 +144,7 @@ Smoke-test status is based on the local control page run on 2026-06-06 with Edge
 | Action | Purpose | Key inputs | Smoke-test status | Smoke-test call |
 | --- | --- | --- | --- | --- |
 | `readPage` | Return current page state | `captureAfter` | Success | `#browserAct { "action": "readPage", "captureAfter": false }` |
+| `mediaExtract` | Collect deduplicated rendered and public-source media URLs | `mediaType`, `maxItems`, optional matching `url` | Parser tests pass; browser smoke pending | `#browserRead { "action": "mediaExtract", "mediaType": "all", "maxItems": 100, "captureAfter": false }` |
 | `capture` | Store current tab capture | `includeScreenshot`, `includeHtml` | Success | `#browserAct { "action": "capture", "captureAfter": true, "includeScreenshot": true }` |
 | `navigate` | Navigate active tab | `url`, `acknowledgement` | Success | `#browserAct { "action": "navigate", "url": "http://127.0.0.1:18080/page1", "acknowledgement": "CONFIRM_BROWSER_ACTION" }` |
 | `click` | Click by selector/text/label | `selector`, `text`, `label` | Success | `#browserAct { "action": "click", "selector": "#click-target" }` |
@@ -507,6 +508,16 @@ After `readPage` or `capture`, inspect `screenSummary.captureQuality`. Treat `le
 ```text
 #browserAct { "action": "networkTraceCapture", "urlIncludes": ["api", "security"], "maxEntries": 50, "captureAfter": false } summarize slow or failed-looking resource activity from the current page.
 ```
+
+### Extract Page Media
+
+```text
+#browserRead { "action": "mediaExtract", "mediaType": "video", "maxItems": 100, "captureAfter": false } extract video URLs from the active page and report completeness warnings.
+```
+
+The action merges the active rendered page with a public source-response pass. Rendered collection inspects media elements, Open Graph/Twitter metadata, JSON-LD, CSS backgrounds, resource timing, and bounded inline scripts. Public source requests use a minimal `Mozilla/5.0` user agent; localhost, loopback, private, and link-local addresses are refused. Instagram public posts use a `contextJSON` adapter that normalizes single posts and carousels and returns `video_url` rather than the video cover image.
+
+Treat `complete: false` as a required review signal. Cross-origin frames, result caps, malformed structured data, source-fetch failures, blob URLs, and DRM can make extraction partial. `NO_MEDIA_FOUND` is an explicit failure rather than silent empty success. The action does not bypass login, private/restricted content, cross-origin isolation, or DRM. When `ephemeral: true`, use a separate operator-reviewed download workflow promptly; media extraction itself does not download files.
 
 ## Result Handling
 
