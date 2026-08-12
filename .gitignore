@@ -5,3 +5,9 @@ node_modules
 *.vsix
 *.zip
 raw/browser-captures/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store

@@ -33,7 +33,7 @@ for (const asset of [vsix, browserZip]) {
 
 const zip = new AdmZip(browserZip);
 const entries = new Set(zip.getEntries().map(entry => entry.entryName));
-for (const file of ['manifest.json', 'protocol-runtime.js', 'background.js', 'popup.html', 'popup.js', 'popup.css']) {
+for (const file of ['manifest.json', 'protocol-runtime.js', 'background.js', 'popup.html', 'popup.js', 'popup.css', 'LICENSE.txt', 'NOTICE']) {
   const expected = `${browserZipRoot}/${file}`;
   if (!entries.has(expected)) {
     throw new Error(`Browser extension ZIP is missing ${expected}`);

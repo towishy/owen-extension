@@ -69,8 +69,8 @@ Clone the repository and use `npm ci` so the dependency versions match `package-
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-extension
-Set-Location C:\OWEN\github\owen-extension
+git clone https://github.com/towishy/owen-extension.git
+Set-Location .\owen-extension
 npm ci
 npm run release:local
 
@@ -243,7 +243,7 @@ Open `Owen Browser Bridge: Open Setup Page`, then use **Allowed Hosts** to add, 
 
 ### Change the capture directory
 
-Open `Owen Browser Bridge: Open Setup Page`, then use **Capture Directory** to save a workspace-relative path such as `raw/browser-captures` or an absolute path such as `C:\OWEN\Drive\wiki_raw_articles\browser-captures`. Click **Reset to Default** to remove the custom setting and return to the extension default.
+Open `Owen Browser Bridge: Open Setup Page`, then use **Capture Directory** to save a workspace-relative path such as `raw/browser-captures` or an absolute path such as `C:\Users\your-name\Documents\browser-captures`. Click **Reset to Default** to remove the custom setting and return to the extension default.
 
 ## Copilot Integration
 
@@ -552,7 +552,14 @@ When a bare semantic-version tag such as `0.1.32` is pushed to GitHub, `.github/
 - Email addresses, IPv4 addresses, GUIDs, and bearer tokens are redacted before storage.
 - Each stored capture has an `_integrity/<capture-id>.json` manifest containing SHA-256 and byte size for its redacted JSON, Markdown, and optional PNG artifacts.
 - Raw captures can still contain sensitive business/security context. Keep `raw/browser-captures/` out of git.
+- The unauthenticated health endpoint exposes only service and protocol compatibility fields.
 
-## Repository
+## Open Source
 
-Planned sync target: <https://github.com/towishy/owen-extension>
+Owen Browser Bridge is licensed under the [Apache License 2.0](LICENSE.txt). Copyright and attribution details are in [NOTICE](NOTICE).
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+- Report vulnerabilities through the private process in [SECURITY.md](SECURITY.md).
+- Review local capture and model data handling in [PRIVACY.md](PRIVACY.md).
+
+Repository: <https://github.com/towishy/owen-extension>

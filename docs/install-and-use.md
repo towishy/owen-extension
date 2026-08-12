@@ -23,8 +23,8 @@ Use this section for a different Windows PC or a Mac.
 ### Build and install from source
 
 ```powershell
-git clone https://github.com/towishy/owen-extension.git C:\OWEN\github\owen-extension
-Set-Location C:\OWEN\github\owen-extension
+git clone https://github.com/towishy/owen-extension.git
+Set-Location .\owen-extension
 npm ci
 npm run release:local
 ```
@@ -60,7 +60,7 @@ Google Chrome:
 
 Common folder locations:
 
-- Windows: `C:\OWEN\github\owen-extension\browser-extension`
+- Windows: `<repository>\browser-extension`
 - macOS: `~/github/owen-extension/browser-extension`
 - Release ZIP: the folder created after extracting `owen-browser-capture-browser-extension-*.zip`
 
@@ -68,7 +68,7 @@ After this, continue with the pairing steps below.
 
 ## 1. Build the VS Code Extension
 
-From `C:\OWEN\github\owen-extension`:
+From the repository root:
 
 ```powershell
 npm install
@@ -77,7 +77,7 @@ npm run compile
 
 ## 2. Run the VS Code Extension Locally
 
-1. Open `C:\OWEN\github\owen-extension` in VS Code.
+1. Open the cloned `owen-extension` repository in VS Code.
 2. Press `F5`.
 3. In the Extension Development Host, run `Owen Browser Bridge: Open Setup Page` from the Command Palette.
 4. Click **Start Server**.
@@ -92,14 +92,14 @@ The local server listens on `http://127.0.0.1:17321` by default.
 1. Open `edge://extensions`.
 2. Enable **Developer mode**.
 3. Select **Load unpacked**.
-4. Choose `C:\OWEN\github\owen-extension\browser-extension`.
+4. Choose the repository's `browser-extension` folder.
 
 ### Google Chrome
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Select **Load unpacked**.
-4. Choose `C:\OWEN\github\owen-extension\browser-extension`.
+4. Choose the repository's `browser-extension` folder.
 
 ## 4. Pair the Browser Extension
 
@@ -256,7 +256,7 @@ Example:
 Use **Capture Directory** on `Owen Browser Bridge: Open Setup Page` to choose where JSON, Markdown, and PNG capture files are stored.
 
 - Enter a workspace-relative path such as `raw/browser-captures`.
-- Enter an absolute path such as `C:\OWEN\Drive\wiki_raw_articles\browser-captures`.
+- Enter an absolute path such as `C:\Users\your-name\Documents\browser-captures`.
 - Enter separate Windows and Mac directory paths when the same VS Code settings sync across multiple machines.
 - Click **Save Directory** to update `owenBrowserBridge.captureDirectory`.
 - Click **Save OS Directories** to update `owenBrowserBridge.captureDirectoryByPlatform.win32` and `owenBrowserBridge.captureDirectoryByPlatform.darwin`.
@@ -266,8 +266,8 @@ Settings JSON example:
 
 ```json
 "owenBrowserBridge.captureDirectoryByPlatform": {
-  "win32": "C:\\OWEN\\Drive\\wiki_raw_articles\\browser-captures",
-  "darwin": "/Users/owen/work/wiki_raw_articles/browser-captures"
+  "win32": "C:\\Users\\your-name\\Documents\\browser-captures",
+  "darwin": "/Users/your-name/Documents/browser-captures"
 }
 ```
 

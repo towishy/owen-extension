@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-08-12
+
+- Relicensed the project under Apache-2.0 with contributor, security-reporting, privacy, and attribution documentation.
+- Reduced the unauthenticated bridge health response to service and protocol compatibility fields only.
+- Updated production and development dependencies to patched releases and restored repository and VSIX ignore rules.
+- Replaced user-specific capture and installation paths with portable examples.
+
 ## [0.1.33] - 2026-07-27
 
 - Added the read-only `mediaExtract` action for deduplicated image, video, and audio discovery across rendered elements, Open Graph/Twitter metadata, JSON-LD, CSS backgrounds, resource timing, bounded inline scripts, and public source responses.

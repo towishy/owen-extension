@@ -258,7 +258,13 @@ suite('Extension Test Suite', () => {
 			const headers = { 'Content-Type': 'application/json', 'X-Owen-Bridge-Token': token };
 			const agentId = 'integration-agent';
 			const nextUrl = `http://127.0.0.1:${port}/commands/next?protocolVersion=${BRIDGE_PROTOCOL_VERSION}&agentId=${agentId}&waitMs=5000`;
-			assert.strictEqual((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
+			const healthResponse = await fetch(`http://127.0.0.1:${port}/health`);
+			assert.strictEqual(healthResponse.status, 200);
+			assert.deepStrictEqual(await healthResponse.json(), {
+				ok: true,
+				service: 'owen-browser-bridge',
+				protocolVersion: BRIDGE_PROTOCOL_VERSION
+			});
 			assert.strictEqual((await fetch(`http://127.0.0.1:${port}/browser/state`)).status, 401);
 			assert.strictEqual((await fetch(`http://127.0.0.1:${port}/browser/state`, { headers })).status, 200);
 			assert.strictEqual((await fetch(nextUrl)).status, 401);

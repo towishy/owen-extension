@@ -1,11 +1,16 @@
 .vscode/**
 .vscode-test/**
 .tmp/**
-.github/workflows/**
+.github/**
 dist/**
 *.zip
 src/**
 out/test/**
+browser-extension/**
+docs/**
+scripts/**
+AGENTS.md
+UI-FOUNDATION-DESIGN-GUIDE.md
 .gitignore
 .yarnrc
 vsc-extension-quickstart.md

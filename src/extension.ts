@@ -597,14 +597,7 @@ async function handleRequest(context: vscode.ExtensionContext, request: http.Inc
 		writeJson(response, 200, {
 			ok: true,
 			service: 'owen-browser-bridge',
-			protocolVersion: BRIDGE_PROTOCOL_VERSION,
-			extensionVersion: context.extension.packageJSON.version,
-			startedAt: bridgeStartedAt,
-			queueDepth: browserCommandQueue.length,
-			leasedCommands: browserCommandQueue.leasedCount,
-			pendingResults: browserCommandWaiters.size,
-			activeAgents: browserAgents.listActive(),
-			metrics: commandMetrics
+			protocolVersion: BRIDGE_PROTOCOL_VERSION
 		});
 		return;
 	}
@@ -3066,17 +3059,17 @@ function renderSetupPage(webview: vscode.Webview, state: { isRunning: boolean; p
 			<p>Set where JSON, Markdown, and PNG capture files are stored. Windows and Mac directory paths are used first on their matching OS. The fallback path is used when no OS-specific path is set.</p>
 			<p class="meta">Fallback directory path</p>
 			<div class="add-host">
-				<input id="captureDirectory" aria-label="Capture directory" value="${escapeHtml(state.captureDirectorySetting)}" placeholder="raw/browser-captures or C:\\OWEN\\Drive\\wiki_raw_articles\\browser-captures">
+				<input id="captureDirectory" aria-label="Capture directory" value="${escapeHtml(state.captureDirectorySetting)}" placeholder="raw/browser-captures or C:\\Users\\your-name\\Documents\\browser-captures">
 				<button data-command="updateCaptureDirectory">Save Directory</button>
 			</div>
 			<p class="meta">Windows directory path</p>
 			<div class="add-host">
-				<input id="windowsCaptureDirectory" aria-label="Windows capture directory" value="${escapeHtml(state.windowsCaptureDirectorySetting)}" placeholder="C:\\OWEN\\Drive\\wiki_raw_articles\\browser-captures">
+				<input id="windowsCaptureDirectory" aria-label="Windows capture directory" value="${escapeHtml(state.windowsCaptureDirectorySetting)}" placeholder="C:\\Users\\your-name\\Documents\\browser-captures">
 				<button data-command="updatePlatformCaptureDirectories">Save OS Directories</button>
 			</div>
 			<p class="meta">Mac directory path</p>
 			<div class="add-host">
-				<input id="macCaptureDirectory" aria-label="Mac capture directory" value="${escapeHtml(state.macCaptureDirectorySetting)}" placeholder="/Users/owen/work/wiki_raw_articles/browser-captures">
+				<input id="macCaptureDirectory" aria-label="Mac capture directory" value="${escapeHtml(state.macCaptureDirectorySetting)}" placeholder="/Users/your-name/Documents/browser-captures">
 				<button data-command="updatePlatformCaptureDirectories">Save OS Directories</button>
 			</div>
 			<p class="meta">Current platform: ${escapeHtml(state.platform)} · Effective setting: ${escapeHtml(state.effectiveCaptureDirectorySetting)}</p>

@@ -2,9 +2,9 @@
   "name": "owen-browser-bridge",
   "displayName": "Owen Browser Bridge",
   "description": "Bridge browser captures into VS Code so GitHub Copilot can analyze tab data and screenshots.",
-  "version": "0.1.33",
+  "version": "0.1.34",
   "publisher": "towishy",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/towishy/owen-extension"
@@ -1471,11 +1471,11 @@
           "properties": {
             "win32": {
               "type": "string",
-              "description": "Windows capture directory path. Example: C:\\OWEN\\Drive\\wiki_raw_articles\\browser-captures"
+              "description": "Windows capture directory path. Example: C:\\Users\\your-name\\Documents\\browser-captures"
             },
             "darwin": {
               "type": "string",
-              "description": "macOS capture directory path. Example: /Users/owen/work/wiki_raw_articles/browser-captures"
+              "description": "macOS capture directory path. Example: /Users/your-name/Documents/browser-captures"
             },
             "linux": {
               "type": "string",
@@ -1573,15 +1573,19 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.120.0",
-    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.9.2",
-    "adm-zip": "^0.5.17",
+    "adm-zip": "^0.6.0",
     "eslint": "^9.39.3",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1"
   },
   "dependencies": {
     "cheerio": "^1.1.2"
+  },
+  "overrides": {
+    "diff": "^8.0.3",
+    "serialize-javascript": "^7.0.5"
   }
 }

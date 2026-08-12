@@ -21,6 +21,7 @@ const requiredFiles = [
   'popup.js',
   'popup.css'
 ];
+const distributionFiles = ['LICENSE.txt', 'NOTICE'];
 
 validateBrowserExtension();
 
@@ -32,6 +33,9 @@ if (!checkOnly) {
     const rel = relative(browserDir, filePath).split(sep).join('/');
     zip.addLocalFile(filePath, dirnameForZipEntry(rootFolder, rel));
   }
+  for (const file of distributionFiles) {
+    zip.addLocalFile(join(root, file), rootFolder);
+  }
   zip.writeZip(outputPath);
   verifyZip(outputPath, rootFolder);
   console.log(`Created ${outputPath}`);
@@ -42,6 +46,11 @@ function validateBrowserExtension() {
     const fullPath = join(browserDir, file);
     if (!statSync(fullPath, { throwIfNoEntry: false })?.isFile()) {
       throw new Error(`Missing browser extension file: ${file}`);
+    }
+  }
+  for (const file of distributionFiles) {
+    if (!statSync(join(root, file), { throwIfNoEntry: false })?.isFile()) {
+      throw new Error(`Missing browser extension distribution file: ${file}`);
     }
   }
 
@@ -75,7 +84,7 @@ function validateBrowserExtension() {
 function verifyZip(zipPath, rootFolder) {
   const zip = new AdmZip(zipPath);
   const entries = new Set(zip.getEntries().map(entry => entry.entryName));
-  for (const file of requiredFiles) {
+  for (const file of [...requiredFiles, ...distributionFiles]) {
     const expected = `${rootFolder}/${file}`;
     if (!entries.has(expected)) {
       throw new Error(`Release ZIP is missing ${expected}`);
